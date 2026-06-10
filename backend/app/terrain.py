@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import os
 import time
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
@@ -27,6 +28,8 @@ from PIL import Image
 from io import BytesIO
 
 gdal.UseExceptions()
+
+_log = logging.getLogger("riverrem.terrain")
 
 # {z}/{x}/{y} template. Override with TERRAIN_TILE_URL env var.
 TERRAIN_TILE_URL = os.environ.get(
@@ -110,8 +113,14 @@ def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str) -> str
     """
     cx0 = (bbox.west + bbox.east) / 2.0
     cy0 = (bbox.south + bbox.north) / 2.0
-    desired = zoom + int(math.log2(resolution_multiplier))
-    z = min(desired, max_available_zoom(cx0, cy0))
+    # `want_z` is the resolution the user asked for (screen zoom + the multiplier).
+    # `fetch_z` is the deepest zoom Mapterhorn actually serves here. We fetch at
+    # fetch_z but always render the OUTPUT grid at want_z, upsampling when the
+    # source is shallower — so the multiplier is never a silent no-op (it adds
+    # real detail where the source has it, a finer interpolation grid where not).
+    want_z = zoom + int(math.log2(resolution_multiplier))
+    fetch_z = min(want_z, max_available_zoom(cx0, cy0))
+    z = fetch_z
     x0, y0 = _lonlat_to_tile(bbox.west, bbox.north, z)
     x1, y1 = _lonlat_to_tile(bbox.east, bbox.south, z)
     xs = range(min(x0, x1), max(x0, x1) + 1)
@@ -172,9 +181,30 @@ def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str) -> str
     utm_zone = int((cx + 180) / 6) + 1
     epsg_utm = (32600 if cy >= 0 else 32700) + utm_zone
 
+    # Output pixel size targets `want_z` (not the possibly-shallower fetch_z), so
+    # the resolution multiplier always scales the DEM grid. Web-Mercator metres
+    # are scaled by cos(lat) to approximate true ground metres in UTM.
+    merc_px_want = (2 * math.pi * 6378137.0) / (2 ** want_z) / ts
+    utm_px = max(0.05, merc_px_want * math.cos(math.radians(cy)))
+
+    # Upsampling (fetch_z < want_z) multiplies the output grid by 4^dz; guard it so
+    # RiverREM's interpolation doesn't crawl / OOM on an oversized DEM.
+    dz = max(0, want_z - fetch_z)
+    out_px = (cols * (2 ** dz)) * (rows * (2 ** dz))
+    if out_px > 60_000_000:
+        raise ValueError(
+            f"{resolution_multiplier}x here would make a {out_px/1e6:.0f} MP DEM "
+            f"(source z{fetch_z} upsampled to z{want_z}). Zoom in or lower the multiplier."
+        )
+    _log.info(
+        "DEM build: screen z%d, want z%d, fetched z%d, output %.2f m/px (%dx)",
+        zoom, want_z, fetch_z, utm_px, resolution_multiplier,
+    )
+
     gdal.Warp(
         out_path, mem,
         dstSRS=f"EPSG:{epsg_utm}",
+        xRes=utm_px, yRes=utm_px,
         resampleAlg="bilinear",
         srcNodata=-9999.0, dstNodata=-9999.0,
         format="GTiff",

@@ -47,8 +47,9 @@ export default function App() {
   const [pickMode, setPickMode] = useState(false);
   const [pick, setPick] = useState<{ lng: number; lat: number; rem: number | null; dem: number | null } | null>(null);
   const layer = opts.layer; // streamed layer (rem/dem) lives in the URL
-  const [remBounds, setRemBounds] = useState<{ min: number; max: number } | null>(null);
-  const [demBounds, setDemBounds] = useState<{ min: number; max: number } | null>(null);
+  type Bounds = { min: number; max: number; log: boolean };
+  const [remBounds, setRemBounds] = useState<Bounds | null>(null);
+  const [demBounds, setDemBounds] = useState<Bounds | null>(null);
 
   const bboxRef = useRef<{ bbox: BBox; zoom: number } | null>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -71,11 +72,34 @@ export default function App() {
     }
     if (activeRem.cog) {
       const b = activeRem.bounds.length === 4 ? (activeRem.bounds as [number, number, number, number]) : null;
+      const bounds = b ?? [view.lng - 0.1, view.lat - 0.1, view.lng + 0.1, view.lat + 0.1] as [number, number, number, number];
+      const isDem = opts.layer === "dem";
+      // The shared URL carries the active layer's symbology in nuqs (min/max/log).
+      const cur: { min: number; max: number; log: boolean } = { min: opts.min, max: opts.max, log: opts.log };
+      const existing = local.find((r) => r.cog === activeRem.cog);
+      const remB = isDem
+        ? (existing && existing.min != null ? { min: existing.min, max: existing.max, log: existing.log ?? true } : null)
+        : cur;
+      const demB = isDem
+        ? cur
+        : (existing && existing.demMin != null && existing.demMax != null ? { min: existing.demMin, max: existing.demMax, log: existing.demLog ?? false } : null);
+      setRemBounds(remB); setDemBounds(demB);
       setResult({
-        job_id: "shared", cog_url: activeRem.cog, dem_url: activeRem.dem || null,
-        bounds: b ?? [view.lng - 0.1, view.lat - 0.1, view.lng + 0.1, view.lat + 0.1],
-        rem_min: opts.min, rem_max: opts.max, river_name: null, river_length_m: null,
+        job_id: existing?.id ?? "shared", cog_url: activeRem.cog, dem_url: activeRem.dem || null,
+        bounds, rem_min: remB?.min ?? opts.min, rem_max: remB?.max ?? opts.max,
+        dem_min: demB?.min ?? null, dem_max: demB?.max ?? null,
+        river_name: existing?.name ?? null, river_length_m: null, centerline_url: existing?.cl ?? null,
       });
+      // Surface the shared view under "Runs" (dedups by COG; keeps an existing name).
+      const id = existing?.id ?? cogPath(activeRem.cog)?.split("/")[0] ?? crypto.randomUUID();
+      setActiveRunId(id);
+      setRuns(addRun({
+        id, cog: activeRem.cog, dem: activeRem.dem || null, bounds,
+        min: remB?.min ?? opts.min, max: remB?.max ?? opts.max, log: remB?.log ?? opts.log,
+        demMin: demB?.min ?? null, demMax: demB?.max ?? null, demLog: demB?.log ?? null,
+        ramp: opts.ramp, reverse: opts.reverse, name: existing?.name ?? null,
+        cl: existing?.cl ?? null, ts: existing?.ts ?? Date.now(),
+      }));
       // A shared link may point at a run whose centerline is hosted alongside the COG.
       const pth = cogPath(activeRem.cog);
       if (pth) {
@@ -86,12 +110,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live symbology sync: editing ramp/min/max/reverse updates the active run.
+  // Live symbology sync: editing ramp/min/max/log updates the active run. Edits to
+  // the DEM view write the DEM fields; REM edits write the REM fields — so the two
+  // ranges never overwrite each other.
   useEffect(() => {
     if (!activeRunId) return;
-    setRuns(updateRun(activeRunId, { ramp: opts.ramp, reverse: opts.reverse, min: opts.min, max: opts.max }));
+    const patch = layer === "dem"
+      ? { ramp: opts.ramp, reverse: opts.reverse, demMin: opts.min, demMax: opts.max, demLog: opts.log }
+      : { ramp: opts.ramp, reverse: opts.reverse, min: opts.min, max: opts.max, log: opts.log };
+    setRuns(updateRun(activeRunId, patch));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opts.ramp, opts.reverse, opts.min, opts.max, activeRunId]);
+  }, [opts.ramp, opts.reverse, opts.min, opts.max, opts.log, layer, activeRunId]);
 
   const onPreview = useCallback(async () => {
     if (!bboxRef.current) return;
@@ -117,7 +146,7 @@ export default function App() {
     finally { setBusy(false); }
   }, []);
 
-  const recordRun = useCallback(async (res: ComputeResponse, mn: number, mx: number) => {
+  const recordRun = useCallback(async (res: ComputeResponse, remB: Bounds, demB: Bounds | null) => {
     setActiveRem({ cog: res.cog_url, dem: res.dem_url || "", bounds: res.bounds });
     const id = res.job_id && res.job_id !== "external" ? res.job_id : crypto.randomUUID();
     let name = res.river_name;
@@ -128,7 +157,9 @@ export default function App() {
     setActiveRunId(id);
     setRuns(addRun({
       id, cog: res.cog_url, dem: res.dem_url, bounds: res.bounds,
-      min: mn, max: mx, ramp: opts.ramp, reverse: opts.reverse, name,
+      min: remB.min, max: remB.max, log: remB.log,
+      demMin: demB?.min ?? null, demMax: demB?.max ?? null, demLog: demB?.log ?? null,
+      ramp: opts.ramp, reverse: opts.reverse, name,
       cl: res.centerline_url ?? null, ts: Date.now(),
     }));
   }, [opts.ramp, opts.reverse, setActiveRem]);
@@ -153,13 +184,13 @@ export default function App() {
         },
         (ph, p) => { setPhase(ph); setPct(displayPct(ph, p)); }
       );
-      const remB = { min: -1, max: Math.max(1, +(res.rem_max * 0.1).toFixed(2)) };
-      const demB = res.dem_min != null && res.dem_max != null
-        ? { min: -1, max: Math.ceil(res.dem_max) } : null;
+      const remB: Bounds = { min: -1, max: Math.max(1, +(res.rem_max * 0.1).toFixed(2)), log: true };
+      const demB: Bounds | null = res.dem_min != null && res.dem_max != null
+        ? { min: Math.floor(res.dem_min), max: Math.ceil(res.dem_max), log: false } : null;
       setRemBounds(remB); setDemBounds(demB);
-      setResult(res); setOpts({ min: remB.min, max: remB.max, layer: "rem" });
+      setResult(res); setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
       if (!cl && res.centerline_url) { const g = await api.centerline(res.centerline_url); if (g) setCenterline(g); }
-      await recordRun(res, remB.min, remB.max);
+      await recordRun(res, remB, demB);
     } catch (e) { alert(`Compute failed: ${(e as Error).message}`); }
     finally { setBusy(false); setPhase(""); setPct(0); }
   }, [opts.res, opts.mode, opts.osm, centerline, uploadId, setOpts, recordRun]);
@@ -172,36 +203,39 @@ export default function App() {
         job_id: "external", cog_url: r.cog_url, dem_url: null, bounds: r.bounds,
         rem_min: r.rem_min, rem_max: r.rem_max, river_name: null, river_length_m: null,
       };
-      const remB = { min: -1, max: Math.ceil(r.rem_max) };
+      const remB: Bounds = { min: -1, max: Math.ceil(r.rem_max), log: true };
       setRemBounds(remB); setDemBounds(null); setCenterline(null);
-      setResult(res); setOpts({ min: remB.min, max: remB.max, layer: "rem" });
-      await recordRun(res, remB.min, remB.max);
+      setResult(res); setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
+      await recordRun(res, remB, null);
     } catch (e) { alert(`Could not load COG: ${(e as Error).message}`); }
     finally { setBusy(false); setPhase(""); setPct(0); }
   }, [setOpts, recordRun]);
 
   const onLoadRun = useCallback((r: Run) => {
-    setResult({ job_id: r.id, cog_url: r.cog, dem_url: r.dem, bounds: r.bounds, rem_min: r.min, rem_max: r.max, river_name: r.name ?? null, river_length_m: null, centerline_url: r.cl ?? null });
+    const remB: Bounds = { min: r.min, max: r.max, log: r.log ?? true };
+    const demB: Bounds | null = r.demMin != null && r.demMax != null
+      ? { min: r.demMin, max: r.demMax, log: r.demLog ?? false } : null;
+    setResult({ job_id: r.id, cog_url: r.cog, dem_url: r.dem, bounds: r.bounds, rem_min: r.min, rem_max: r.max, dem_min: demB?.min ?? null, dem_max: demB?.max ?? null, river_name: r.name ?? null, river_length_m: null, centerline_url: r.cl ?? null });
     setActiveRem({ cog: r.cog, dem: r.dem || "", bounds: r.bounds });
     setActiveRunId(r.id); setRemVisible(true);
-    setRemBounds({ min: r.min, max: r.max }); setDemBounds(null);
-    setOpts({ ramp: r.ramp as any, reverse: !!r.reverse, min: r.min, max: r.max, layer: "rem" });
+    setRemBounds(remB); setDemBounds(demB);
+    setOpts({ ramp: r.ramp as any, reverse: !!r.reverse, min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
     if (r.cl) api.centerline(r.cl).then(setCenterline); else setCenterline(null);
   }, [setActiveRem, setOpts]);
 
-  // Switch streamed layer (REM vs DEM) and apply that layer's stored bounds.
+  // Switch streamed layer (REM vs DEM) and apply that layer's stored bounds (incl. log).
   const onSetLayer = useCallback((l: "rem" | "dem") => {
     const b = l === "dem" ? demBounds : remBounds;
-    setOpts(b ? { layer: l, min: b.min, max: b.max } : { layer: l });
+    setOpts(b ? { layer: l, min: b.min, max: b.max, log: b.log } : { layer: l });
   }, [demBounds, remBounds, setOpts]);
 
-  // Persist slider/min/max edits into the active layer's bounds.
+  // Persist slider/min/max/log edits into the active layer's bounds.
   useEffect(() => {
     if (!result) return;
-    if (layer === "dem") setDemBounds({ min: opts.min, max: opts.max });
-    else setRemBounds({ min: opts.min, max: opts.max });
+    const b: Bounds = { min: opts.min, max: opts.max, log: opts.log };
+    if (layer === "dem") setDemBounds(b); else setRemBounds(b);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opts.min, opts.max]);
+  }, [opts.min, opts.max, opts.log]);
 
   const onDeleteRun = useCallback((id: string) => { setRuns(removeRun(id)); if (id === activeRunId) setActiveRunId(null); }, [activeRunId]);
   const onRenameRun = useCallback((id: string, name: string) => setRuns(updateRun(id, { name })), []);

@@ -290,7 +290,7 @@ export function SidePanel(p: {
             <div className="flex items-center justify-between">
               <Label>Export</Label>
               <div className="flex gap-1">
-                <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={p.onCopyImage}><Copy className="h-3 w-3" />Copy</Button>
+                <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={p.onCopyImage}><Copy className="h-3 w-3" />Copy image</Button>
                 <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={share}><Share2 className="h-3 w-3" />{copied ? "Copied!" : "Share"}</Button>
               </div>
             </div>
@@ -301,10 +301,14 @@ export function SidePanel(p: {
               <Button variant="outline" size="sm" onClick={p.onExportCenterline} disabled={!p.hasCenterline}><FileDown className="mr-1 h-3 w-3" />Centerline</Button>
             </div>
             <Button variant="ghost" size="sm" className="h-7 w-full gap-1 text-xs"
-              onClick={() => window.open(
-                `https://source-cooperative.github.io/cog-viewer/?url=${encodeURIComponent(result.cog_url)}&mode=single&bands=1&rescale=${result.rem_min},${result.rem_max}&panel=open`,
-                "_blank", "noreferrer")}>
-              <ExternalLink className="h-3 w-3" />View REM in cog-viewer
+              onClick={() => {
+                const dem = p.layer === "dem" && result.dem_url;
+                const url = dem ? result.dem_url! : result.cog_url;
+                window.open(
+                  `https://source-cooperative.github.io/cog-viewer/?url=${encodeURIComponent(url)}&mode=single&bands=1&rescale=${opts.min},${opts.max}&panel=open`,
+                  "_blank", "noreferrer");
+              }}>
+              <ExternalLink className="h-3 w-3" />View {p.layer === "dem" && result.dem_url ? "DEM" : "REM"} in cog-viewer
             </Button>
           </div>
         </>
@@ -406,7 +410,8 @@ export function SidePanel(p: {
           REM method:{" "}
           <a className="underline" href="https://dancoecarto.com/creating-rems-in-qgis-the-idw-method" target="_blank" rel="noreferrer">Dan Coe — IDW</a>{" "}
           · automated by{" "}
-          <a className="underline" href="https://github.com/OpenTopography/RiverREM" target="_blank" rel="noreferrer">OpenTopography RiverREM</a>
+          <a className="underline" href="https://opentopography.org/blog/new-package-automates-river-relative-elevation-model-rem-generation" target="_blank" rel="noreferrer">OpenTopography RiverREM</a>{" "}
+          (<a className="underline" href="https://github.com/OpenTopography/RiverREM" target="_blank" rel="noreferrer">repo</a>)
         </p>
         <p>
           Made by{" "}

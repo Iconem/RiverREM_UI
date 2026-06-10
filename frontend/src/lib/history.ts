@@ -8,8 +8,12 @@ export type Run = {
   cog: string;
   dem?: string | null;
   bounds: [number, number, number, number];
-  min: number;
+  min: number;          // REM symbology
   max: number;
+  log?: boolean;        // REM log/linear
+  demMin?: number | null;  // DEM symbology (so toggling DEM restores its own range)
+  demMax?: number | null;
+  demLog?: boolean | null;
   ramp: string;
   reverse?: boolean;
   name?: string | null;
