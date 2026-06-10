@@ -98,8 +98,8 @@ export const api = {
 
 // Open-data geocoder (Photon / komoot, OSM-based, no key).
 export type GeoHit = { label: string; lng: number; lat: number };
-export async function geocode(q: string): Promise<GeoHit[]> {
-  const r = await fetch(`https://photon.komoot.io/api/?limit=5&q=${encodeURIComponent(q)}`);
+export async function geocode(q: string, signal?: AbortSignal): Promise<GeoHit[]> {
+  const r = await fetch(`https://photon.komoot.io/api/?limit=5&q=${encodeURIComponent(q)}`, { signal });
   if (!r.ok) return [];
   const j = await r.json();
   return (j.features ?? []).map((f: any) => {

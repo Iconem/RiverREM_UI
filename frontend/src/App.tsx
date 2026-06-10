@@ -191,18 +191,36 @@ export default function App() {
     try { await navigator.clipboard.writeText(window.location.href); } catch { /* ignore */ }
   }, []);
 
-  const onExportComposite = useCallback(() => {
-    const c = mapRef.current?.getCanvas();
-    if (!c) return;
-    c.toBlob((b) => b && download(b, `rem_${result?.job_id ?? "view"}.jpg`), "image/jpeg", 0.92);
+  // Capture the map canvas in-frame. react-map-gl v8 doesn't forward
+  // preserveDrawingBuffer, so reading the canvas later yields black; instead we read
+  // it synchronously inside a fresh render frame.
+  const captureCanvas = (type: string, quality?: number): Promise<Blob | null> => {
+    const map = mapRef.current;
+    if (!map) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      map.once("render", () => {
+        try {
+          const url = map.getCanvas().toDataURL(type, quality);
+          const [meta, b64] = url.split(",");
+          const mime = /:(.*?);/.exec(meta)?.[1] ?? type;
+          const bin = atob(b64);
+          const arr = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          resolve(new Blob([arr], { type: mime }));
+        } catch { resolve(null); }
+      });
+      map.triggerRepaint();
+    });
+  };
+
+  const onExportComposite = useCallback(async () => {
+    const b = await captureCanvas("image/jpeg", 0.92);
+    if (b) download(b, `rem_${result?.job_id ?? "view"}.jpg`);
   }, [result]);
 
-  const onCopyImage = useCallback(() => {
-    const c = mapRef.current?.getCanvas();
-    if (!c) return;
-    c.toBlob(async (b) => {
-      try { if (b) await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]); } catch { /* ignore */ }
-    }, "image/png");
+  const onCopyImage = useCallback(async () => {
+    const b = await captureCanvas("image/png");
+    try { if (b) await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]); } catch { /* ignore */ }
   }, []);
 
   const onExportRaw = useCallback(() => result && downloadUrl(result.cog_url, `rem_${result.job_id}.tif`), [result]);
@@ -224,7 +242,19 @@ export default function App() {
   }, [result]);
 
   const [geoHits, setGeoHits] = useState<GeoHit[]>([]);
-  const onGeocode = useCallback(async (q: string) => { setGeoHits(q.trim() ? await geocode(q) : []); }, []);
+  const geoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const geoAbort = useRef<AbortController | null>(null);
+  const onGeocode = useCallback((q: string) => {
+    if (geoTimer.current) clearTimeout(geoTimer.current);
+    if (!q.trim()) { setGeoHits([]); return; }
+    // Debounce keystrokes and abort the previous in-flight request so the latest
+    // query resolves first and stale slow responses can't overwrite it.
+    geoTimer.current = setTimeout(async () => {
+      geoAbort.current?.abort();
+      geoAbort.current = new AbortController();
+      try { setGeoHits(await geocode(q, geoAbort.current.signal)); } catch { /* aborted */ }
+    }, 120);
+  }, []);
   const onFlyTo = useCallback((lng: number, lat: number) => {
     setGeoHits([]);
     mapRef.current?.flyTo({ center: [lng, lat], zoom: Math.max(mapRef.current.getZoom(), 12) });
@@ -255,7 +285,7 @@ export default function App() {
           pct={pct}
           result={result}
           layer={layer}
-          hasDem={!!(result?.dem_url && demBounds)}
+          hasDem={!!result?.dem_url}
           onSetLayer={onSetLayer}
           hasCenterline={!!centerline}
           previewInfo={centerInfo}

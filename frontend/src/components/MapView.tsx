@@ -110,9 +110,10 @@ export function MapView({
     if (!cogUrl) return;
 
     const url = `cog://${cogUrl}#dem`;
-    // Force TERRARIUM encoding (4 mm step): this custom renderer wins over geomatico's
-    // built-in terrain encoder for the #dem path.
-    setColorFunction(url, terrariumColorFunction);
+    // Force TERRARIUM encoding (~4 mm step) on the #dem path: a custom color function
+    // wins over geomatico's built-in terrain encoder. IMPORTANT: geomatico keys the
+    // function by the BARE cog url (no cog:// prefix, no #dem) — see its README.
+    setColorFunction(cogUrl, terrariumColorFunction);
 
     const key = `${cogUrl.replace(/\W+/g, "").slice(-10)}-${Date.now().toString(36)}`;
     const src = `rem-src-${key}`;
@@ -208,7 +209,6 @@ export function MapView({
       mapLib={maplibregl as never}
       initialViewState={{ longitude: initialView.lng, latitude: initialView.lat, zoom: initialView.zoom }}
       mapStyle={STYLE}
-      {...({ preserveDrawingBuffer: true } as object)}
       onLoad={() => {
         ensureProtocol();
         setReady(true);

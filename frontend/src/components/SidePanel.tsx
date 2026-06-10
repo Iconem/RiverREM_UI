@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Upload, Pencil, Waves, Play, Loader2, Download, Share2, Layers, Trash2, FileDown,
-  Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, Crosshair, ExternalLink,
+  Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, ChevronRight, Crosshair, ExternalLink,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { rampCss } from "@/lib/colormap";
-import { RAMP_NAMES } from "@/lib/state";
+import { RAMP_NAMES, useUiState } from "@/lib/state";
 import { OVERPASS_PRESETS } from "@/lib/osm";
 import type { Run } from "@/lib/history";
 import type { ComputeResponse, GeoHit } from "@/lib/api";
@@ -68,6 +68,7 @@ export function SidePanel(p: {
   onGeocode: (q: string) => void; onFlyTo: (lng: number, lat: number) => void;
 }) {
   const { opts, setOpts, busy, result } = p;
+  const [ui, setUi] = useUiState();
   const fileRef = useRef<HTMLInputElement>(null);
   const [cogUrl, setCogUrl] = useState("");
   const [collapsed, setCollapsed] = useState(false);
@@ -159,9 +160,13 @@ export function SidePanel(p: {
 
       <Separator />
 
-      {/* Centerline */}
+      {/* Centerline (foldable; folded by default) */}
       <div className="space-y-2">
-        <Label>Centerline</Label>
+        <button className="flex w-full items-center justify-between" onClick={() => setUi({ foldCl: !ui.foldCl })}>
+          <Label className="cursor-pointer">Centerline</Label>
+          {ui.foldCl ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </button>
+        {!ui.foldCl && (<>
         <Tabs value={opts.mode} onValueChange={(v) => setOpts({ mode: v as Opts["mode"] })}>
           <TabsList>
             <TabsTrigger value="osm"><Waves className="mr-1 h-3 w-3" />OSM</TabsTrigger>
@@ -201,6 +206,7 @@ export function SidePanel(p: {
         {p.previewInfo && (
           <p className="font-mono text-[10px] text-muted-foreground">{p.previewInfo.river_name} · {(p.previewInfo.river_length_m / 1000).toFixed(1)} km</p>
         )}
+        </>)}
       </div>
 
       <Separator />
@@ -209,16 +215,6 @@ export function SidePanel(p: {
       <div className="flex items-center justify-between">
         <Label>Resolution</Label>
         <Tabs value={String(opts.res)} onValueChange={(v) => setOpts({ res: Number(v) })}>
-          <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-3">{r}×</TabsTrigger>)}</TabsList>
-        </Tabs>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div>
-          <Label>Oversample</Label>
-          <div className="font-mono text-[9px] text-muted-foreground">display supersampling · sharper on 4K</div>
-        </div>
-        <Tabs value={String(opts.oversample)} onValueChange={(v) => setOpts({ oversample: Number(v) })}>
           <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-3">{r}×</TabsTrigger>)}</TabsList>
         </Tabs>
       </div>
@@ -243,15 +239,17 @@ export function SidePanel(p: {
 
       <Separator />
 
-      {/* Styling */}
+      {/* Styling (foldable; oversample lives here) */}
       <div className="space-y-3">
+        <button className="flex w-full items-center justify-between" onClick={() => setUi({ foldRamp: !ui.foldRamp })}>
+          <Label className="cursor-pointer">Colour ramp</Label>
+          {ui.foldRamp ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </button>
+        {!ui.foldRamp && (<>
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label>Colour ramp</Label>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
-              <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
-            </div>
+          <div className="flex items-center justify-end gap-2">
+            <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
+            <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
           </div>
           <Select value={opts.ramp} onValueChange={(v) => setOpts({ ramp: v as Opts["ramp"] })}>
             <SelectTrigger><span className="flex items-center gap-2"><Swatch ramp={opts.ramp} reverse={opts.reverse} />{opts.ramp}</span></SelectTrigger>
@@ -288,6 +286,17 @@ export function SidePanel(p: {
           <span className="font-mono text-[10px] text-muted-foreground">log</span>
           <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
         </div>
+
+        <div className="flex items-center justify-between pt-1">
+          <div>
+            <Label>Oversample</Label>
+            <div className="font-mono text-[9px] text-muted-foreground">display supersampling · sharper on 4K</div>
+          </div>
+          <Tabs value={String(opts.oversample)} onValueChange={(v) => setOpts({ oversample: Number(v) })}>
+            <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-3">{r}×</TabsTrigger>)}</TabsList>
+          </Tabs>
+        </div>
+        </>)}
       </div>
 
       {result && (

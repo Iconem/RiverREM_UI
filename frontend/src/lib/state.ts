@@ -53,3 +53,12 @@ export function useActiveRem() {
     bounds: parseAsArrayOf(parseAsFloat).withDefault([]),
   });
 }
+
+// Collapsed/expanded state of side-panel sections, persisted in the URL so a shared
+// link restores the same layout. Centerline is folded by default.
+export function useUiState() {
+  return useQueryStates({
+    foldCl: parseAsBoolean.withDefault(true), // centerline options folded by default
+    foldRamp: parseAsBoolean.withDefault(false),
+  });
+}

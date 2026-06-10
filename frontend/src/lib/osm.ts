@@ -180,10 +180,14 @@ SELECT ?name ?wkt WHERE {
   FILTER(?ww = "river" || ?ww = "stream" || ?ww = "tidal_channel")
   FILTER(geof:sfIntersects(?wkt, "${poly}"^^geo:wktLiteral))
 } LIMIT 5000`;
+  // Use a "simple" CORS request (form-encoded body + only safelisted headers) so the
+  // browser skips the OPTIONS preflight — qlever's endpoint 308-redirects preflights,
+  // which CORS forbids. Accept is a safelisted header; application/x-www-form-urlencoded
+  // is a safelisted content-type.
   const res = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/sparql-query", Accept: "application/sparql-results+json" },
-    body: sparql,
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/sparql-results+json" },
+    body: "query=" + encodeURIComponent(sparql),
   });
   if (!res.ok) throw new Error(`QLever ${res.status}`);
   const json = await res.json();
