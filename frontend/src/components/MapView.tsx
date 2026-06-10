@@ -16,6 +16,9 @@ function ensureProtocol() {
   try { maplibregl.addProtocol("cog", cogProtocol as never); } catch { /* already */ }
   registered = true;
 }
+// Register at module load so the protocol is always present before the first tile
+// request, even across Strict-Mode double-mounts / HMR.
+ensureProtocol();
 
 // float height -> terrarium RGB. NoData (e.g. -9999) round-trips and is made
 // transparent by colorReliefExpr's sub-min floor stop.
@@ -121,7 +124,7 @@ export function MapView({
     map.addSource(src, {
       type: "raster-dem",
       url,
-      tileSize: 512, // read 4× more COG pixels per tile than 256 → less blocky
+      tileSize: 256,
       encoding: "terrarium",
       bounds: cogBounds ?? undefined,
     } as any);
@@ -209,6 +212,7 @@ export function MapView({
       mapLib={maplibregl as never}
       initialViewState={{ longitude: initialView.lng, latitude: initialView.lat, zoom: initialView.zoom }}
       mapStyle={STYLE}
+      canvasContextAttributes={{ preserveDrawingBuffer: true }}
       onLoad={() => {
         ensureProtocol();
         setReady(true);

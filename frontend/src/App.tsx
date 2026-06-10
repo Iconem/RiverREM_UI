@@ -25,7 +25,7 @@ function displayPct(phase: string, pct: number): number {
     "Running RiverREM": 40, "Finding centerline": 42, "Sampling river elevation": 50,
     "Detrending DEM": 92, "Building COG": 96, Done: 100,
   };
-  if (phase === "Interpolating water surface") return Math.round(55 + (pct || 0) * 0.35);
+  if (phase === "Interpolating river surface") return Math.round(55 + (pct || 0) * 0.35);
   return m[phase] ?? 10;
 }
 
@@ -191,36 +191,18 @@ export default function App() {
     try { await navigator.clipboard.writeText(window.location.href); } catch { /* ignore */ }
   }, []);
 
-  // Capture the map canvas in-frame. react-map-gl v8 doesn't forward
-  // preserveDrawingBuffer, so reading the canvas later yields black; instead we read
-  // it synchronously inside a fresh render frame.
-  const captureCanvas = (type: string, quality?: number): Promise<Blob | null> => {
-    const map = mapRef.current;
-    if (!map) return Promise.resolve(null);
-    return new Promise((resolve) => {
-      map.once("render", () => {
-        try {
-          const url = map.getCanvas().toDataURL(type, quality);
-          const [meta, b64] = url.split(",");
-          const mime = /:(.*?);/.exec(meta)?.[1] ?? type;
-          const bin = atob(b64);
-          const arr = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-          resolve(new Blob([arr], { type: mime }));
-        } catch { resolve(null); }
-      });
-      map.triggerRepaint();
-    });
-  };
-
-  const onExportComposite = useCallback(async () => {
-    const b = await captureCanvas("image/jpeg", 0.92);
-    if (b) download(b, `rem_${result?.job_id ?? "view"}.jpg`);
+  const onExportComposite = useCallback(() => {
+    const c = mapRef.current?.getCanvas();
+    if (!c) return;
+    c.toBlob((b) => b && download(b, `rem_${result?.job_id ?? "view"}.jpg`), "image/jpeg", 0.92);
   }, [result]);
 
-  const onCopyImage = useCallback(async () => {
-    const b = await captureCanvas("image/png");
-    try { if (b) await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]); } catch { /* ignore */ }
+  const onCopyImage = useCallback(() => {
+    const c = mapRef.current?.getCanvas();
+    if (!c) return;
+    c.toBlob(async (b) => {
+      try { if (b) await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]); } catch { /* ignore */ }
+    }, "image/png");
   }, []);
 
   const onExportRaw = useCallback(() => result && downloadUrl(result.cog_url, `rem_${result.job_id}.tif`), [result]);

@@ -82,8 +82,12 @@ _THREAD_JOB: dict[int, str] = {}
 
 _PHASE_KEYWORDS = [
     ("river centerline", "Finding centerline"),
+    # Check "Interpolating" BEFORE "river elevation": RiverREM logs
+    # "Interpolating river elevation across DEM extent" (contains both), and the
+    # interpolation is the long KD-tree step we want to surface.
+    ("Interpolating", "Interpolating river surface"),
+    ("Getting river elevation", "Sampling river elevation"),
     ("river elevation", "Sampling river elevation"),
-    ("Interpolating", "Interpolating water surface"),
     ("Detrending", "Detrending DEM"),
 ]
 
@@ -96,7 +100,10 @@ class _ProgressHandler(logging.Handler):
         msg = record.getMessage()
         m = re.search(r"(\d+(?:\.\d+)?)\s*%", msg)
         if m:
+            # Only the interpolation step logs a running %, so a % line means we're
+            # interpolating the river surface (the slowest phase).
             JOBS[jid]["pct"] = float(m.group(1))
+            JOBS[jid]["phase"] = "Interpolating river surface"
         for kw, phase in _PHASE_KEYWORDS:
             if kw in msg:
                 JOBS[jid]["phase"] = phase
