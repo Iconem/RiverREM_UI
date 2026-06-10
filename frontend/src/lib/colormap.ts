@@ -57,8 +57,11 @@ export function rampCss(name: string, reverse = false): string {
 export function colorReliefExpr(name: string, min: number, max: number, reverse = false): any[] {
   const stops = rampStops(name, reverse);
   const span = max - min || 1;
-  const expr: any[] = ["interpolate", ["linear"], ["elevation"], -30000, "rgba(0,0,0,0)"];
-  let prev = -30000;
+  // Everything below the data range — including the COG's nodata (e.g. -9999) — is
+  // transparent: clamp a transparent stop just under `min`, then the ramp colours.
+  const floor = min - Math.max(0.001, span * 0.001);
+  const expr: any[] = ["interpolate", ["linear"], ["elevation"], floor, "rgba(0,0,0,0)"];
+  let prev = floor;
   for (const [t, [r, g, b]] of stops) {
     let e = min + t * span;
     if (e <= prev) e = prev + 1e-4; // strictly increasing for interpolate

@@ -60,6 +60,18 @@ app.add_middleware(
 app.mount("/cogs", StaticFiles(directory=COG_DIR), name="cogs")
 
 
+@app.middleware("http")
+async def no_store_cogs(request, call_next):
+    """geotiff.js fires many concurrent range requests at each COG. Chrome's HTTP
+    cache can't service overlapping partial reads of the same URL and aborts them
+    with net::ERR_CACHE_OPERATION_NOT_SUPPORTED, so tiles silently fail to render.
+    Marking COG responses no-store keeps every range request on the network path."""
+    response = await call_next(request)
+    if request.url.path.startswith("/cogs/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Job registry + progress. RiverREM logs its KD-tree interpolation progress as
 # "<pct>%" lines (the slowest step); we attach a logging handler that attributes

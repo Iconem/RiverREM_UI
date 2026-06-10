@@ -8,7 +8,7 @@ services:
   api:
     build: ./backend
     environment:
-      PUBLIC_BASE: http://localhost:8080
+      PUBLIC_BASE: http://localhost:${WEB_PORT:-8088}
       DATA_DIR: /data
     volumes:
       - cogs:/data
@@ -20,7 +20,7 @@ services:
       args:
         VITE_API_BASE: ""
     ports:
-      - "8080:80"
+      - "${WEB_PORT:-8088}:80"
     depends_on: [api]
     restart: unless-stopped
 

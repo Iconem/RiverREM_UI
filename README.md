@@ -199,7 +199,7 @@ proxy, no Traefik):
 ```
 docker compose -f docker-compose.local.yml up --build
 ```
-Open http://localhost:8080.
+Open http://localhost:8088 (override the port with `WEB_PORT=NNNN` if 8088 is taken).
 
 ---
 
