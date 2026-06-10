@@ -92,12 +92,13 @@ export function SidePanel(p: {
   const dataMax = result ? Math.ceil(isDem ? result.dem_max ?? result.rem_max : result.rem_max) : 10;
   const linLo = Math.min(-1, dataMin, opts.min);
   const linHi = Math.max(dataMax, opts.max, Math.ceil((dataMax - Math.min(0, dataMin)) * 2), 1);
-  const logLo = -1;
-  const logHi = Math.max(1, Math.ceil(Math.log10(Math.max(10, linHi))));
-  const toS = (v: number) => (opts.log ? Math.log10(Math.max(0.1, v)) : v);
-  const fromS = (x: number) => (opts.log ? +(10 ** x).toFixed(2) : +x.toFixed(2));
-  const sMin = opts.log ? logLo : linLo;
-  const sMax = opts.log ? logHi : linHi;
+  // Shifted-log: offset so that linLo maps to log10(1) = 0, preserving negatives.
+  // off = 1 - linLo  =>  log10(v + off) is defined for all v >= linLo
+  const logOff = 1 - linLo;
+  const toS = (v: number) => (opts.log ? Math.log10(v + logOff) : v);
+  const fromS = (x: number) => (opts.log ? +(10 ** x - logOff).toFixed(2) : +x.toFixed(2));
+  const sMin = opts.log ? toS(linLo) : linLo;
+  const sMax = opts.log ? toS(linHi) : linHi;
 
   const share = () => { p.onShare(); setCopied(true); setTimeout(() => setCopied(false), 3000); };
   const flipLayer = () => p.onSetLayer(p.layer === "rem" ? "dem" : "rem");

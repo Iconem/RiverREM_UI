@@ -58,6 +58,9 @@ class PruneRequest(BaseModel):
 
 class PruneResponse(BaseModel):
     existing: list[str] = []  # subset of `paths` whose COG still exists on disk
+
+
+class CenterlineResponse(BaseModel):
     """Preview of the OSM-derived centerline so the UI can show it before computing."""
     geojson: dict
     river_name: Optional[str] = None
