@@ -52,15 +52,25 @@ export function rampCss(name: string, reverse = false): string {
 }
 
 /** MapLibre `color-relief-color` expression over ["elevation"] (metres above river).
- *  A transparent floor below `min` makes NoData (encoded as a low sentinel) render
- *  transparent while real values clamp to the first colour. */
+ *  - Nodata sentinel (-9999) stays transparent so ocean/outside-bbox pixels vanish.
+ *  - Real values below `min` clamp to the first ramp colour (no transparency hole).
+ *  - Real values above `max` clamp to the last ramp colour (MapLibre does this
+ *    automatically for values beyond the last interpolate stop). */
 export function colorReliefExpr(name: string, min: number, max: number, reverse = false): any[] {
   const stops = rampStops(name, reverse);
   const span = max - min || 1;
-  // Everything below the data range — including the COG's nodata (e.g. -9999) — is
-  // transparent: clamp a transparent stop just under `min`, then the ramp colours.
-  const floor = min - Math.max(0.001, span * 0.001);
-  const expr: any[] = ["interpolate", ["linear"], ["elevation"], floor, "rgba(0,0,0,0)"];
+  const [, [fr, fg, fb]] = stops[0];
+  // Nodata is -9999; keep a transparent band from -9999 up to a safe threshold
+  // well below any real REM/DEM value, then snap to the first ramp colour.
+  const NODATA    = -9999;
+  const nodataTop = NODATA + (min - NODATA) * 0.9; // 90% of the way from -9999 to min
+  const floor     = min - Math.max(0.001, span * 0.001);
+  const expr: any[] = [
+    "interpolate", ["linear"], ["elevation"],
+    NODATA,    "rgba(0,0,0,0)",          // nodata sentinel → transparent
+    nodataTop, "rgba(0,0,0,0)",          // transparent up to safe threshold
+    floor,     `rgb(${fr},${fg},${fb})`, // clamp real sub-min values to first ramp colour
+  ];
   let prev = floor;
   for (const [t, [r, g, b]] of stops) {
     let e = min + t * span;
