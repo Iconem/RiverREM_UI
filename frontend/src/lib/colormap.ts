@@ -35,6 +35,13 @@ export const RAMPS: Record<string, Ramp> = {
   terrain: { name: "terrain", stops: S([[0, "#333399"], [0.25, "#0099ff"], [0.5, "#00cc66"], [0.7, "#ffff66"], [0.85, "#cc9966"], [1, "#ffffff"]]) },
   rdbu_r: { name: "rdbu_r", stops: S([[0, "#053061"], [0.35, "#4393c3"], [0.5, "#f7f7f7"], [0.65, "#d6604d"], [1, "#67001f"]]) },
   gray: { name: "gray", stops: S([[0, "#0a0a0a"], [1, "#f5f5f5"]]) },
+  // ColorBrewer Set3 (qualitative, 12 colours) spread evenly — unusual for a
+  // continuous REM but handy as banded relief.
+  set3: { name: "set3", stops: S([
+    [0, "#8dd3c7"], [0.0909, "#ffffb3"], [0.1818, "#bebada"], [0.2727, "#fb8072"],
+    [0.3636, "#80b1d3"], [0.4545, "#fdb462"], [0.5454, "#b3de69"], [0.6363, "#fccde5"],
+    [0.7272, "#d9d9d9"], [0.8181, "#bc80bd"], [0.9090, "#ccebc5"], [1, "#ffed6f"],
+  ]) },
 };
 
 /** Ramp stops, optionally reversed (flip the colour direction). */
@@ -56,9 +63,17 @@ export function rampCss(name: string, reverse = false): string {
  *  - Real values below `min` clamp to the first ramp colour (no transparency hole).
  *  - Real values above `max` clamp to the last ramp colour (MapLibre does this
  *    automatically for values beyond the last interpolate stop). */
-export function colorReliefExpr(name: string, min: number, max: number, reverse = false): any[] {
+export function colorReliefExpr(name: string, min: number, max: number, reverse = false, transparent: "none" | "white" | "black" = "none"): any[] {
   const stops = rampStops(name, reverse);
   const span = max - min || 1;
+  // Per-stop alpha: optionally fade out the white (or black) end so an RGB
+  // satellite basemap shows through the lightest/darkest relief.
+  const alphaOf = (r: number, g: number, b: number): number => {
+    if (transparent === "white") return Math.round(255 * (1 - Math.min(r, g, b) / 255)); // white → 0
+    if (transparent === "black") return Math.round(255 * (Math.max(r, g, b) / 255));     // black → 0
+    return 255;
+  };
+  const css = (r: number, g: number, b: number) => `rgba(${r},${g},${b},${(alphaOf(r, g, b) / 255).toFixed(3)})`;
   const [, [fr, fg, fb]] = stops[0];
   // Nodata is -9999; keep a transparent band from -9999 up to a safe threshold
   // well below any real REM/DEM value, then snap to the first ramp colour.
@@ -67,16 +82,16 @@ export function colorReliefExpr(name: string, min: number, max: number, reverse 
   const floor     = min - Math.max(0.001, span * 0.001);
   const expr: any[] = [
     "interpolate", ["linear"], ["elevation"],
-    NODATA,    "rgba(0,0,0,0)",          // nodata sentinel → transparent
-    nodataTop, "rgba(0,0,0,0)",          // transparent up to safe threshold
-    floor,     `rgb(${fr},${fg},${fb})`, // clamp real sub-min values to first ramp colour
+    NODATA,    "rgba(0,0,0,0)",   // nodata sentinel → transparent
+    nodataTop, "rgba(0,0,0,0)",   // transparent up to safe threshold
+    floor,     css(fr, fg, fb),   // clamp real sub-min values to first ramp colour
   ];
   let prev = floor;
   for (const [t, [r, g, b]] of stops) {
     let e = min + t * span;
     if (e <= prev) e = prev + 1e-4; // strictly increasing for interpolate
     prev = e;
-    expr.push(e, `rgb(${r},${g},${b})`);
+    expr.push(e, css(r, g, b));
   }
   return expr;
 }

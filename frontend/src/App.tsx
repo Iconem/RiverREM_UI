@@ -70,23 +70,29 @@ export default function App() {
 
   // Grab a small JPEG of the current map for the runs gallery. Waits for the COG
   // to finish rendering (map "idle") before drawing the canvas down to 360px wide.
+  const drawThumb = useCallback((runId: string) => {
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      const src = map.getCanvas();
+      const w = 360, h = Math.max(1, Math.round((w * src.height) / src.width));
+      const off = document.createElement("canvas");
+      off.width = w; off.height = h;
+      const ctx = off.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(src, 0, 0, w, h);
+      setRuns(updateRun(runId, { thumb: off.toDataURL("image/jpeg", 0.55) }));
+    } catch { /* ignore (e.g. tainted canvas) */ }
+  }, []);
+
   const captureThumb = useCallback((runId: string) => {
     const map = mapRef.current;
     if (!map) return;
-    const draw = () => {
-      try {
-        const src = map.getCanvas();
-        const w = 360, h = Math.max(1, Math.round((w * src.height) / src.width));
-        const off = document.createElement("canvas");
-        off.width = w; off.height = h;
-        const ctx = off.getContext("2d");
-        if (!ctx) return;
-        ctx.drawImage(src, 0, 0, w, h);
-        setRuns(updateRun(runId, { thumb: off.toDataURL("image/jpeg", 0.55) }));
-      } catch { /* ignore (e.g. tainted canvas) */ }
-    };
-    setTimeout(() => { map.once("idle", draw); map.triggerRepaint(); }, 600);
-  }, []);
+    setTimeout(() => { map.once("idle", () => drawThumb(runId)); map.triggerRepaint(); }, 600);
+  }, [drawThumb]);
+
+  // Manual override: snapshot the current view immediately (user picked the frame).
+  const onRecaptureThumb = useCallback((runId: string) => drawThumb(runId), [drawThumb]);
 
   // Load saved runs + rehydrate a shared COG from the URL (once).
   useEffect(() => {
@@ -386,6 +392,7 @@ export default function App() {
           onLoadRun={onLoadRun}
           onDeleteRun={onDeleteRun}
           onRenameRun={onRenameRun}
+          onRecaptureThumb={onRecaptureThumb}
           onToggleLayer={() => setRemVisible((v) => !v)}
           onTogglePick={() => setPickMode((v) => !v)}
           onGeocode={onGeocode}

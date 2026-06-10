@@ -68,7 +68,7 @@ const BASE_LAYERS: Record<string, string[]> = {
   dark: ["carto-dark"], satellite: ["esri-sat"], hillshade: ["mapterhorn-hillshade"],
 };
 
-type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number; hillshade: string };
+type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number; hillshade: string; transparent: "none" | "white" | "black" };
 
 export function MapView({
   initialView, opts, cogUrl, cogBounds, fitSignal, preview, remVisible, pickMode,
@@ -132,7 +132,7 @@ export function MapView({
     map.addLayer({
       id: layer, type: "color-relief", source: src,
       layout: { visibility: remVisible ? "visible" : "none" },
-      paint: { "color-relief-color": colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse) as any, "color-relief-opacity": 0.95 },
+      paint: { "color-relief-color": colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse, opts.transparent) as any, "color-relief-opacity": 0.95 },
     } as any);
     remRef.current = { src, layer };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -175,8 +175,8 @@ export function MapView({
     const map = mapRef.current?.getMap();
     const id = remRef.current?.layer;
     if (!map || !ready || !id || !map.getLayer(id)) return;
-    map.setPaintProperty(id, "color-relief-color", colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse) as any);
-  }, [opts.ramp, opts.reverse, opts.min, opts.max, ready]);
+    map.setPaintProperty(id, "color-relief-color", colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse, opts.transparent) as any);
+  }, [opts.ramp, opts.reverse, opts.min, opts.max, opts.transparent, ready]);
 
   // Layer show/hide (eye toggle).
   useEffect(() => {

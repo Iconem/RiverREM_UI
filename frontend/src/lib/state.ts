@@ -15,7 +15,7 @@ import {
 
 export const RAMP_NAMES = [
   "mako_r", "blues_r", "gray", "viridis", "spectral", "topo",
-  "inferno", "magma", "plasma", "cividis", "turbo", "terrain", "rdbu_r",
+  "inferno", "magma", "plasma", "cividis", "turbo", "terrain", "rdbu_r", "set3",
 ] as const;
 export const BASEMAPS = ["dark", "satellite", "hillshade"] as const;
 
@@ -35,6 +35,7 @@ export function useRemOptions() {
     base: parseAsStringEnum([...BASEMAPS]).withDefault("dark"),
     ramp: parseAsStringEnum([...RAMP_NAMES]).withDefault("mako_r"),
     reverse: parseAsBoolean.withDefault(false),
+    transparent: parseAsStringEnum(["none", "white", "black"]).withDefault("none"), // make the white/black end see-through
     min: parseAsFloat.withDefault(0),
     max: parseAsFloat.withDefault(10),
     log: parseAsBoolean.withDefault(true),

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Upload, Pencil, Waves, Play, Loader2, Download, Share2, Layers, Trash2, FileDown,
   Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, ChevronRight, Crosshair, ExternalLink,
-  List, LayoutGrid, ImageOff,
+  List, LayoutGrid, ImageOff, Camera,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,11 +23,11 @@ type Opts = {
   mode: "osm" | "geojson" | "shapefile";
   base: "dark" | "satellite" | "hillshade";
   ramp: (typeof RAMP_NAMES)[number];
-  reverse: boolean; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; osm: string;
+  reverse: boolean; transparent: "none" | "white" | "black"; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; osm: string;
 };
 
-function Swatch({ ramp, reverse = false }: { ramp: string; reverse?: boolean }) {
-  return <span className="inline-block h-3 w-8 shrink-0 rounded-sm" style={{ background: rampCss(ramp, reverse) }} />;
+function Swatch({ ramp, reverse = false, className = "h-3 w-8" }: { ramp: string; reverse?: boolean; className?: string }) {
+  return <span className={`inline-block shrink-0 rounded-sm ${className}`} style={{ background: rampCss(ramp, reverse) }} />;
 }
 
 function FoldHeader({ label, folded, onClick }: { label: string; folded: boolean; onClick: () => void }) {
@@ -75,6 +75,7 @@ export function SidePanel(p: {
   onShare: () => void; onExportComposite: () => void; onCopyImage: () => void;
   onExportRaw: () => void; onExportDem: () => void; onExportCenterline: () => void;
   onLoadRun: (r: Run) => void; onDeleteRun: (id: string) => void; onRenameRun: (id: string, name: string) => void;
+  onRecaptureThumb: (id: string) => void;
   onToggleLayer: () => void; onTogglePick: () => void;
   onGeocode: (q: string) => void; onFlyTo: (lng: number, lat: number) => void;
 }) {
@@ -87,12 +88,14 @@ export function SidePanel(p: {
   const [editName, setEditName] = useState("");
   const [geoQ, setGeoQ] = useState("");
 
-  // Slider bounds always span the active layer's data range AND the current
-  // selection, in both log and linear; min floor is at least -1.
+  // Slider bounds span the active layer's data range AND the current selection.
+  // REM is clamped to a -10 m floor (it can dip slightly below the river but not
+  // arbitrarily); DEM uses its own elevation floor.
   const isDem = p.layer === "dem";
+  const REM_FLOOR = -10;
   const dataMin = result ? Math.floor(isDem ? result.dem_min ?? result.rem_min : result.rem_min) : 0;
   const dataMax = result ? Math.ceil(isDem ? result.dem_max ?? result.rem_max : result.rem_max) : 10;
-  const linLo = Math.min(-1, dataMin, opts.min);
+  const linLo = isDem ? Math.min(dataMin, opts.min) : Math.min(REM_FLOOR, opts.min);
   const linHi = Math.max(dataMax, opts.max, Math.ceil((dataMax - Math.min(0, dataMin)) * 2), 1);
   // Shifted-log: offset so that linLo maps to log10(1) = 0, preserving negatives.
   // off = 1 - linLo  =>  log10(v + off) is defined for all v >= linLo
@@ -216,12 +219,12 @@ export function SidePanel(p: {
       )}
 
       {result && p.hasDem && (
-        <div className="flex items-center justify-between">
+        <div className="space-y-1">
           <Label>Layer (click to flip)</Label>
-          <div className="inline-flex overflow-hidden rounded-md border border-border text-xs font-medium">
+          <div className="flex h-10 overflow-hidden rounded-md border border-border text-sm font-medium">
             {(["rem", "dem"] as const).map((l) => (
               <button key={l} onClick={flipLayer}
-                className={`px-3 py-1 transition-colors ${p.layer === l ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}>
+                className={`flex-1 transition-colors ${p.layer === l ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}>
                 {l.toUpperCase()}
               </button>
             ))}
@@ -236,26 +239,45 @@ export function SidePanel(p: {
         <FoldHeader label="Colour ramp" folded={ui.foldRamp} onClick={() => setUi({ foldRamp: !ui.foldRamp })} />
         {!ui.foldRamp && (<>
           <div className="space-y-2">
-            <div className="flex items-center justify-end gap-2">
-              <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
-              <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
+                <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Label className="cursor-pointer">Transparent</Label>
+                <Tabs value={opts.transparent} onValueChange={(v) => setOpts({ transparent: v as Opts["transparent"] })}>
+                  <TabsList className="w-auto">
+                    <TabsTrigger value="none" className="px-2">None</TabsTrigger>
+                    <TabsTrigger value="white" className="px-2">White</TabsTrigger>
+                    <TabsTrigger value="black" className="px-2">Black</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </div>
             </div>
             <Select value={opts.ramp} onValueChange={(v) => setOpts({ ramp: v as Opts["ramp"] })}>
-              <SelectTrigger><span className="flex items-center gap-2"><Swatch ramp={opts.ramp} reverse={opts.reverse} />{opts.ramp}</span></SelectTrigger>
+              <SelectTrigger>
+                <span className="flex w-full items-center gap-2">
+                  <Swatch ramp={opts.ramp} reverse={opts.reverse} className="h-3.5 flex-[3]" />
+                  <span className="flex-1 truncate text-right text-xs text-muted-foreground">{opts.ramp}</span>
+                </span>
+              </SelectTrigger>
               <SelectContent>
-                {RAMP_NAMES.map((n) => <SelectItem key={n} value={n}><span className="flex items-center gap-2"><Swatch ramp={n} reverse={opts.reverse} />{n}</span></SelectItem>)}
+                {RAMP_NAMES.map((n) => (
+                  <SelectItem key={n} value={n}>
+                    <span className="flex w-full items-center gap-2">
+                      <Swatch ramp={n} reverse={opts.reverse} className="h-3.5 flex-[3]" />
+                      <span className="flex-1 truncate text-right text-xs">{n}</span>
+                    </span>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
 
-          <div className="space-y-1">
-            <div className="h-3 w-full rounded-sm border border-border" style={{ background: rampCss(opts.ramp, opts.reverse) }} />
-            <div className="flex justify-between font-mono text-[10px] text-muted-foreground"><span>{opts.min} m</span><span>{opts.max} m</span></div>
-          </div>
-
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1"><Label>Min (m)</Label>
-              <Input type="number" step="0.1" value={opts.min} onChange={(e) => setOpts({ min: Math.min(parseFloat(e.target.value), opts.max - 0.1) })} /></div>
+              <Input type="number" step="0.1" value={opts.min} onChange={(e) => setOpts({ min: Math.max(isDem ? -Infinity : REM_FLOOR, Math.min(parseFloat(e.target.value), opts.max - 0.1)) })} /></div>
             <div className="space-y-1"><Label>Max (m)</Label>
               <Input type="number" step="0.1" value={opts.max} onChange={(e) => setOpts({ max: Math.max(parseFloat(e.target.value), opts.min + 0.1) })} /></div>
           </div>
@@ -420,6 +442,7 @@ export function SidePanel(p: {
                           </>
                         ) : (
                           <>
+                            {active && (<button onClick={() => p.onRecaptureThumb(r.id)} aria-label="recapture thumbnail" className="text-muted-foreground hover:text-foreground"><Camera className="h-3 w-3" /></button>)}
                             <button onClick={() => { setEditId(r.id); setEditName(r.name || ""); }} aria-label="rename" className="text-muted-foreground hover:text-foreground"><Pencil className="h-3 w-3" /></button>
                             <button onClick={() => p.onDeleteRun(r.id)} aria-label="delete" className="text-muted-foreground hover:text-foreground"><Trash2 className="h-3 w-3" /></button>
                           </>
@@ -457,6 +480,7 @@ export function SidePanel(p: {
                         </>
                       ) : (
                         <>
+                          {active && (<button onClick={() => p.onRecaptureThumb(r.id)} aria-label="recapture thumbnail" className="text-muted-foreground hover:text-foreground"><Camera className="h-3 w-3" /></button>)}
                           <button onClick={() => { setEditId(r.id); setEditName(r.name || ""); }} aria-label="rename" className="text-muted-foreground hover:text-foreground"><Pencil className="h-3 w-3" /></button>
                           <button onClick={() => p.onDeleteRun(r.id)} aria-label="delete" className="text-muted-foreground hover:text-foreground"><Trash2 className="h-3 w-3" /></button>
                         </>
