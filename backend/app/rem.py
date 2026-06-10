@@ -95,16 +95,20 @@ def make_rem_cog(
     _to_cog(rem_ras, out_cog_path, src_nodata=nodata)
     rem_min, rem_max = _percentiles(rem_ras, nodata=nodata)
 
-    # publish the source DEM as a COG too, for optional client-side hillshade
+    # publish the source DEM as a COG too, for optional client-side hillshade / DEM view
     dem_cog = out_cog_path.replace("_REM", "_DEM")
+    dem_min = dem_max = None
     try:
         _to_cog(dem_path, dem_cog, src_nodata=-9999.0)
+        dem_min, dem_max = _percentiles(dem_cog, nodata=-9999.0)
     except Exception:
         dem_cog = None
 
     return {
         "rem_min": round(rem_min, 3),
         "rem_max": round(rem_max, 3),
+        "dem_min": round(dem_min, 3) if dem_min is not None else None,
+        "dem_max": round(dem_max, 3) if dem_max is not None else None,
         # REMMaker logs the chosen river name but doesn't store it as an attribute;
         # it does store river_length. Use the OSM preview endpoint for the name.
         "river_name": None,

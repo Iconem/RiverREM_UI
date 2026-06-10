@@ -46,6 +46,9 @@ export default function App() {
   const [remVisible, setRemVisible] = useState(true);
   const [pickMode, setPickMode] = useState(false);
   const [pick, setPick] = useState<{ lng: number; lat: number; rem: number | null; dem: number | null } | null>(null);
+  const [layer, setLayer] = useState<"rem" | "dem">("rem");
+  const [remBounds, setRemBounds] = useState<{ min: number; max: number } | null>(null);
+  const [demBounds, setDemBounds] = useState<{ min: number; max: number } | null>(null);
 
   const bboxRef = useRef<{ bbox: BBox; zoom: number } | null>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -132,9 +135,12 @@ export default function App() {
         },
         (ph, p) => { setPhase(ph); setPct(displayPct(ph, p)); }
       );
-      const mn = Math.max(0, Math.floor(res.rem_min)), mx = Math.ceil(res.rem_max);
-      setResult(res); setOpts({ min: mn, max: mx });
-      await recordRun(res, mn, mx);
+      const remB = { min: Math.floor(res.rem_min), max: Math.max(1, +(res.rem_max * 0.1).toFixed(2)) };
+      const demB = res.dem_min != null && res.dem_max != null
+        ? { min: Math.floor(res.dem_min), max: Math.ceil(res.dem_max) } : null;
+      setRemBounds(remB); setDemBounds(demB); setLayer("rem");
+      setResult(res); setOpts({ min: remB.min, max: remB.max });
+      await recordRun(res, remB.min, remB.max);
     } catch (e) { alert(`Compute failed: ${(e as Error).message}`); }
     finally { setBusy(false); setPhase(""); setPct(0); }
   }, [opts.res, opts.mode, opts.osm, centerline, uploadId, setOpts, recordRun]);
@@ -147,8 +153,10 @@ export default function App() {
         job_id: "external", cog_url: r.cog_url, dem_url: null, bounds: r.bounds,
         rem_min: r.rem_min, rem_max: r.rem_max, river_name: null, river_length_m: null,
       };
-      setResult(res); setOpts({ min: Math.floor(r.rem_min), max: Math.ceil(r.rem_max) });
-      await recordRun(res, Math.floor(r.rem_min), Math.ceil(r.rem_max));
+      const remB = { min: Math.floor(r.rem_min), max: Math.ceil(r.rem_max) };
+      setRemBounds(remB); setDemBounds(null); setLayer("rem");
+      setResult(res); setOpts({ min: remB.min, max: remB.max });
+      await recordRun(res, remB.min, remB.max);
     } catch (e) { alert(`Could not load COG: ${(e as Error).message}`); }
     finally { setBusy(false); setPhase(""); setPct(0); }
   }, [setOpts, recordRun]);
@@ -157,8 +165,24 @@ export default function App() {
     setResult({ job_id: r.id, cog_url: r.cog, dem_url: r.dem, bounds: r.bounds, rem_min: r.min, rem_max: r.max, river_name: r.name ?? null, river_length_m: null });
     setActiveRem({ cog: r.cog, dem: r.dem || "", bounds: r.bounds });
     setActiveRunId(r.id); setRemVisible(true);
+    setLayer("rem"); setRemBounds({ min: r.min, max: r.max }); setDemBounds(null);
     setOpts({ ramp: r.ramp as any, reverse: !!r.reverse, min: r.min, max: r.max });
   }, [setActiveRem, setOpts]);
+
+  // Switch streamed layer (REM vs DEM) and apply that layer's stored bounds.
+  const onSetLayer = useCallback((l: "rem" | "dem") => {
+    setLayer(l);
+    const b = l === "dem" ? demBounds : remBounds;
+    if (b) setOpts({ min: b.min, max: b.max });
+  }, [demBounds, remBounds, setOpts]);
+
+  // Persist slider/min/max edits into the active layer's bounds.
+  useEffect(() => {
+    if (!result) return;
+    if (layer === "dem") setDemBounds({ min: opts.min, max: opts.max });
+    else setRemBounds({ min: opts.min, max: opts.max });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts.min, opts.max]);
 
   const onDeleteRun = useCallback((id: string) => { setRuns(removeRun(id)); if (id === activeRunId) setActiveRunId(null); }, [activeRunId]);
   const onRenameRun = useCallback((id: string, name: string) => setRuns(updateRun(id, { name })), []);
@@ -211,7 +235,8 @@ export default function App() {
       <MapView
         initialView={{ lng: view.lng, lat: view.lat, zoom: view.zoom }}
         opts={opts}
-        result={result}
+        cogUrl={result ? (layer === "dem" ? result.dem_url || result.cog_url : result.cog_url) : null}
+        cogBounds={result?.bounds ?? null}
         preview={centerline}
         remVisible={remVisible}
         pickMode={pickMode}
@@ -229,6 +254,9 @@ export default function App() {
           phase={phase}
           pct={pct}
           result={result}
+          layer={layer}
+          hasDem={!!(result?.dem_url && demBounds)}
+          onSetLayer={onSetLayer}
           hasCenterline={!!centerline}
           previewInfo={centerInfo}
           runs={runs}

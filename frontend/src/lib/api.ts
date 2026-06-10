@@ -21,6 +21,8 @@ export type ComputeResponse = {
   bounds: [number, number, number, number];
   rem_min: number;
   rem_max: number;
+  dem_min?: number | null;
+  dem_max?: number | null;
   river_name: string | null;
   river_length_m: number | null;
 };

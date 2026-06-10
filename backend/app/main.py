@@ -149,6 +149,7 @@ def _run_compute(job_id: str, req: ComputeRequest):
             dem_url=dem_url,
             bounds=[req.bbox.west, req.bbox.south, req.bbox.east, req.bbox.north],
             rem_min=meta["rem_min"], rem_max=meta["rem_max"],
+            dem_min=meta.get("dem_min"), dem_max=meta.get("dem_max"),
             river_name=meta.get("river_name"), river_length_m=meta.get("river_length_m"),
         )
         _set(job_id, status="done", phase="Done", pct=100, result=resp.model_dump())

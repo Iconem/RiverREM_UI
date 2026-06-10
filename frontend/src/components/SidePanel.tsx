@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Upload, Pencil, Waves, Play, Loader2, Download, Share2, Layers, Trash2, FileDown,
-  Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, Crosshair,
+  Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, Crosshair, ExternalLink,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,7 @@ export function SidePanel(p: {
   opts: Opts; setOpts: (o: Partial<Opts>) => void;
   busy: boolean; phase: string; pct: number;
   result: ComputeResponse | null; hasCenterline: boolean;
+  layer: "rem" | "dem"; hasDem: boolean; onSetLayer: (l: "rem" | "dem") => void;
   previewInfo: { river_name: string; river_length_m: number } | null;
   runs: Run[]; activeRunId: string | null; remVisible: boolean; pickMode: boolean;
   pick: { lng: number; lat: number; rem: number | null; dem: number | null } | null;
@@ -76,13 +77,20 @@ export function SidePanel(p: {
   const [geoQ, setGeoQ] = useState("");
 
   // Smart slider bounds from the computed REM range.
-  const remRange = result ? Math.max(0.5, result.rem_max - Math.min(0, result.rem_min)) : 10;
-  const linBound = Math.max(1, Math.ceil(remRange * 2));
-  const logLo = -1, logHi = Math.max(1, Math.ceil(Math.log10(Math.max(10, remRange * 10))));
+  // Slider bounds must always span the active layer's data range AND the current
+  // selection, in both log and linear, so switching modes never traps a value
+  // out of reach.
+  const isDem = p.layer === "dem";
+  const dataMin = result ? Math.floor(isDem ? result.dem_min ?? result.rem_min : result.rem_min) : 0;
+  const dataMax = result ? Math.ceil(isDem ? result.dem_max ?? result.rem_max : result.rem_max) : 10;
+  const linLo = Math.min(0, dataMin, opts.min);
+  const linHi = Math.max(dataMax, opts.max, Math.ceil((dataMax - Math.min(0, dataMin)) * 2), 1);
+  const logLo = -1;
+  const logHi = Math.max(1, Math.ceil(Math.log10(Math.max(10, linHi))));
   const toS = (v: number) => (opts.log ? Math.log10(Math.max(0.1, v)) : v);
   const fromS = (x: number) => (opts.log ? +(10 ** x).toFixed(2) : +x.toFixed(2));
-  const sMin = opts.log ? logLo : Math.min(0, result ? Math.floor(result.rem_min) : 0);
-  const sMax = opts.log ? logHi : linBound;
+  const sMin = opts.log ? logLo : linLo;
+  const sMax = opts.log ? logHi : linHi;
 
   const share = () => { p.onShare(); setCopied(true); setTimeout(() => setCopied(false), 3000); };
 
@@ -221,6 +229,18 @@ export function SidePanel(p: {
       </Button>
       <Progress active={busy} label={p.phase} pct={p.pct} />
 
+      {result && p.hasDem && (
+        <div className="flex items-center justify-between">
+          <Label>Layer</Label>
+          <Tabs value={p.layer} onValueChange={(v) => p.onSetLayer(v as "rem" | "dem")}>
+            <TabsList className="w-auto">
+              <TabsTrigger value="rem" className="px-3">REM</TabsTrigger>
+              <TabsTrigger value="dem" className="px-3">DEM</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+      )}
+
       <Separator />
 
       {/* Styling */}
@@ -304,6 +324,15 @@ export function SidePanel(p: {
               <Button variant="outline" size="sm" onClick={p.onExportDem} disabled={!result.dem_url}><FileDown className="mr-1 h-3 w-3" />DEM COG</Button>
               <Button variant="outline" size="sm" onClick={p.onExportCenterline} disabled={!p.hasCenterline}><FileDown className="mr-1 h-3 w-3" />Centerline</Button>
             </div>
+            <Button
+              variant="ghost" size="sm" className="h-7 w-full gap-1 text-xs"
+              onClick={() => window.open(
+                `https://source-cooperative.github.io/cog-viewer/?url=${encodeURIComponent(result.cog_url)}&mode=single&bands=1&rescale=${result.rem_min},${result.rem_max}&panel=open`,
+                "_blank", "noreferrer"
+              )}
+            >
+              <ExternalLink className="h-3 w-3" />View REM in cog-viewer
+            </Button>
           </div>
         </>
       )}

@@ -44,6 +44,8 @@ class ComputeResponse(BaseModel):
     # river surface. Seeds the colour-ramp min/max in the UI.
     rem_min: float
     rem_max: float
+    dem_min: Optional[float] = None
+    dem_max: Optional[float] = None
     river_name: Optional[str] = None
     river_length_m: Optional[float] = None
 

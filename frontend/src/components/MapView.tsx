@@ -2,19 +2,31 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Map, { Source, Layer, type MapRef } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
 import type { StyleSpecification, Map as MlMap } from "maplibre-gl";
-import { cogProtocol } from "@geomatico/maplibre-cog-protocol";
+import { cogProtocol, setColorFunction } from "@geomatico/maplibre-cog-protocol";
 import { colorReliefExpr } from "@/lib/colormap";
-import type { BBox, ComputeResponse } from "@/lib/api";
+import type { BBox } from "@/lib/api";
 
-// Register the geomatico COG protocol once. The `cog://…#dem` path decodes the
-// float COG (using the COG's own scale/offset/noData) into terrarium-encoded
-// raster-dem tiles, which a native MapLibre `color-relief` layer tints on the GPU.
+// Register the geomatico COG protocol once. For the `cog://…#dem` path we register a
+// custom color function (below) that wins over geomatico's built-in terrain encoder,
+// so the float COG is encoded as TERRARIUM (~4 mm vertical step) rather than Mapbox
+// Terrain-RGB (~100 mm). A native MapLibre `color-relief` layer then tints it.
 let registered = false;
 function ensureProtocol() {
   if (registered) return;
   try { maplibregl.addProtocol("cog", cogProtocol as never); } catch { /* already */ }
   registered = true;
 }
+
+// float height -> terrarium RGB. NoData (e.g. -9999) round-trips and is made
+// transparent by colorReliefExpr's sub-min floor stop.
+const terrariumColorFunction = (pixel: any, color: any) => {
+  const height = pixel[0];
+  const v = height + 32768;
+  const r = Math.floor(v / 256);
+  const g = Math.floor(v % 256);
+  const b = Math.floor((v - Math.floor(v)) * 256);
+  color.set([r, g, b, 255]);
+};
 
 const MAPTERHORN_DEM = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
 
@@ -53,18 +65,16 @@ const BASE_LAYERS: Record<string, string[]> = {
   dark: ["carto-dark"], satellite: ["esri-sat"], hillshade: ["mapterhorn-hillshade"],
 };
 
-const REM_SOURCE = "rem-dem";
-const REM_LAYER = "rem-color";
-
 type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number };
 
 export function MapView({
-  initialView, opts, result, preview, remVisible, pickMode,
+  initialView, opts, cogUrl, cogBounds, preview, remVisible, pickMode,
   onBounds, onView, onDrawn, onMapReady, onPick,
 }: {
   initialView: { lng: number; lat: number; zoom: number };
   opts: Opts;
-  result: ComputeResponse | null;
+  cogUrl: string | null;
+  cogBounds: [number, number, number, number] | null;
   preview: GeoJSON.GeoJSON | null;
   remVisible: boolean;
   pickMode: boolean;
@@ -75,6 +85,7 @@ export function MapView({
   onPick: (lng: number, lat: number) => void;
 }) {
   const mapRef = useRef<MapRef | null>(null);
+  const remRef = useRef<{ src: string; layer: string } | null>(null);
   const [ready, setReady] = useState(false);
 
   const emitBounds = useCallback(() => {
@@ -85,43 +96,59 @@ export function MapView({
     onView({ lng: map.getCenter().lng, lat: map.getCenter().lat, zoom: map.getZoom() });
   }, [onBounds, onView]);
 
-  // Add / replace the REM color-relief layer when a new COG is computed.
+  // Add / replace the COG (REM or DEM) color-relief layer. Each COG gets a fresh
+  // source+layer id so switching runs/layers tears the old one down and the protocol
+  // re-requests tiles for the new URL (no stale-source reuse).
   useEffect(() => {
     const map = mapRef.current?.getMap();
     if (!map || !ready) return;
-    if (map.getLayer(REM_LAYER)) map.removeLayer(REM_LAYER);
-    if (map.getSource(REM_SOURCE)) map.removeSource(REM_SOURCE);
-    if (!result) return;
+    if (remRef.current) {
+      if (map.getLayer(remRef.current.layer)) map.removeLayer(remRef.current.layer);
+      if (map.getSource(remRef.current.src)) map.removeSource(remRef.current.src);
+      remRef.current = null;
+    }
+    if (!cogUrl) return;
 
-    map.addSource(REM_SOURCE, {
+    const url = `cog://${cogUrl}#dem`;
+    // Force TERRARIUM encoding (4 mm step): this custom renderer wins over geomatico's
+    // built-in terrain encoder for the #dem path.
+    setColorFunction(url, terrariumColorFunction);
+
+    const key = `${cogUrl.replace(/\W+/g, "").slice(-10)}-${Date.now().toString(36)}`;
+    const src = `rem-src-${key}`;
+    const layer = `rem-layer-${key}`;
+    map.addSource(src, {
       type: "raster-dem",
-      url: `cog://${result.cog_url}#dem`,
+      url,
       tileSize: 512, // read 4× more COG pixels per tile than 256 → less blocky
       encoding: "terrarium",
-      bounds: result.bounds,
+      bounds: cogBounds ?? undefined,
     } as any);
     map.addLayer({
-      id: REM_LAYER, type: "color-relief", source: REM_SOURCE,
+      id: layer, type: "color-relief", source: src,
       layout: { visibility: remVisible ? "visible" : "none" },
       paint: { "color-relief-color": colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse) as any, "color-relief-opacity": 0.95 },
     } as any);
-    map.fitBounds(result.bounds, { padding: 40, duration: 600 });
+    remRef.current = { src, layer };
+    if (cogBounds) map.fitBounds(cogBounds, { padding: 40, duration: 600 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, ready]);
+  }, [cogUrl, ready]);
 
   // Live recolour — just update the paint expression (GPU, instant).
   useEffect(() => {
     const map = mapRef.current?.getMap();
-    if (!map || !ready || !map.getLayer(REM_LAYER)) return;
-    map.setPaintProperty(REM_LAYER, "color-relief-color", colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse) as any);
+    const id = remRef.current?.layer;
+    if (!map || !ready || !id || !map.getLayer(id)) return;
+    map.setPaintProperty(id, "color-relief-color", colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse) as any);
   }, [opts.ramp, opts.reverse, opts.min, opts.max, ready]);
 
   // Layer show/hide (eye toggle).
   useEffect(() => {
     const map = mapRef.current?.getMap();
-    if (!map || !ready || !map.getLayer(REM_LAYER)) return;
-    map.setLayoutProperty(REM_LAYER, "visibility", remVisible ? "visible" : "none");
-  }, [remVisible, ready, result]);
+    const id = remRef.current?.layer;
+    if (!map || !ready || !id || !map.getLayer(id)) return;
+    map.setLayoutProperty(id, "visibility", remVisible ? "visible" : "none");
+  }, [remVisible, ready, cogUrl]);
 
   // Basemap switching.
   useEffect(() => {
