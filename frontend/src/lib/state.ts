@@ -1,0 +1,55 @@
+/**
+ * All shareable state lives in the URL via nuqs: map view + every sidepanel
+ * control (centerline mode, ramp, min/max, log, resolution). Copying the URL
+ * reproduces the exact view and styling.
+ */
+import {
+  parseAsFloat,
+  parseAsInteger,
+  parseAsBoolean,
+  parseAsString,
+  parseAsStringEnum,
+  parseAsArrayOf,
+  useQueryStates,
+} from "nuqs";
+
+export const RAMP_NAMES = [
+  "mako_r", "blues_r", "gray", "viridis", "spectral", "topo",
+  "inferno", "magma", "plasma", "cividis", "turbo", "terrain", "rdbu_r",
+] as const;
+export const BASEMAPS = ["dark", "satellite", "hillshade"] as const;
+
+export function useMapView() {
+  return useQueryStates({
+    // Willamette River meanders near Corvallis, OR — clear floodplain channels,
+    // good Mapterhorn coverage, REM reads nicely here.
+    lng: parseAsFloat.withDefault(-123.25),
+    lat: parseAsFloat.withDefault(44.57),
+    zoom: parseAsFloat.withDefault(13),
+  });
+}
+
+export function useRemOptions() {
+  return useQueryStates({
+    mode: parseAsStringEnum(["osm", "geojson", "shapefile"]).withDefault("osm"),
+    base: parseAsStringEnum([...BASEMAPS]).withDefault("dark"),
+    ramp: parseAsStringEnum([...RAMP_NAMES]).withDefault("mako_r"),
+    reverse: parseAsBoolean.withDefault(false),
+    min: parseAsFloat.withDefault(0),
+    max: parseAsFloat.withDefault(10),
+    log: parseAsBoolean.withDefault(true),
+    res: parseAsInteger.withDefault(1), // 1 | 2 | 4 resolution multiplier
+    oversample: parseAsInteger.withDefault(1), // GPU supersampling factor (× device DPR)
+    osm: parseAsString.withDefault("https://qlever.cs.uni-freiburg.de/api/osm-planet"),
+  });
+}
+
+// The active REM COG reference lives in the URL too, so a copied link reloads the
+// exact COG (any browser/user — the COG is public) with the same styling.
+export function useActiveRem() {
+  return useQueryStates({
+    cog: parseAsString.withDefault(""),
+    dem: parseAsString.withDefault(""),
+    bounds: parseAsArrayOf(parseAsFloat).withDefault([]),
+  });
+}

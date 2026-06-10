@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+.osm_cache/
+.cache/
+__pycache__/
+*.pyc
+.env.local

@@ -1,0 +1,28 @@
+name: riverrem-local
+# Full-stack smoke test on your dev machine — exercises the exact prod build + the
+# nginx same-origin proxy, with no Traefik. Run:
+#   docker compose -f docker-compose.local.yml up --build
+# then open http://localhost:8080
+
+services:
+  api:
+    build: ./backend
+    environment:
+      PUBLIC_BASE: http://localhost:8080
+      DATA_DIR: /data
+    volumes:
+      - cogs:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: ""
+    ports:
+      - "8080:80"
+    depends_on: [api]
+    restart: unless-stopped
+
+volumes:
+  cogs:
