@@ -174,16 +174,21 @@ pragmatic lightest. (Alpine/musl GDAL is smaller but fights prebuilt wheels.)
 
 ## Run it / develop
 
-**Fast hot-reload dev** (recommended while coding) — backend in Docker, Vite HMR for
-the front-end:
+### Dev commands (Windows cmd, hot reload)
 
-Backend:
+Backend — terminal 1:
 ```
 cd backend
 docker build -t riverrem-api .
-docker run -p 8000:8000 -e PUBLIC_BASE=http://localhost:8000 -v %cd%/data:/data riverrem-api
+docker run --rm -p 8000:8000 -e PUBLIC_BASE=http://localhost:8000 -v %cd%\data:/data riverrem-api
 ```
-Frontend (separate terminal):
+That serves on :8000 and persists COGs in `backend\data`. For backend code
+hot-reload, mount the app and add `--reload`:
+```
+docker run --rm -p 8000:8000 -e PUBLIC_BASE=http://localhost:8000 -v %cd%\app:/srv/app -v %cd%\data:/data riverrem-api uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Frontend — terminal 2 (Vite HMR, instant):
 ```
 cd frontend
 pnpm install

@@ -10,11 +10,13 @@ enqueue + status-poll, but the work is identical). Endpoints:
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
 import re
 import shutil
+import subprocess
 import threading
 import uuid
 import zipfile
@@ -36,6 +38,8 @@ from .schemas import (
     CogIngestResponse,
     ComputeRequest,
     ComputeResponse,
+    PruneRequest,
+    PruneResponse,
 )
 from .terrain import build_dem
 
@@ -150,6 +154,26 @@ def _run_compute(job_id: str, req: ComputeRequest):
         dem_url = None
         if meta.get("dem_cog") and os.path.exists(meta["dem_cog"]):
             dem_url = f"{PUBLIC_BASE}/cogs/{os.path.relpath(meta['dem_cog'], COG_DIR)}"
+
+        # Persist the centerline alongside the COG so it travels with the run
+        # (other users loading a shared run can fetch it). Written as GeoJSON,
+        # served statically under /cogs.
+        centerline_url = None
+        cl_path = os.path.join(job_dir, "centerline.geojson")
+        try:
+            if req.centerline_geojson:
+                with open(cl_path, "w") as f:
+                    json.dump(req.centerline_geojson, f)
+            elif centerline_shp and os.path.exists(centerline_shp):
+                subprocess.run(
+                    ["ogr2ogr", "-f", "GeoJSON", "-t_srs", "EPSG:4326", cl_path, centerline_shp],
+                    check=True, capture_output=True,
+                )
+            if os.path.exists(cl_path):
+                centerline_url = f"{PUBLIC_BASE}/cogs/{os.path.relpath(cl_path, COG_DIR)}"
+        except Exception:
+            centerline_url = None
+
         resp = ComputeResponse(
             job_id=job_id,
             cog_url=f"{PUBLIC_BASE}/cogs/{rel}",
@@ -158,6 +182,7 @@ def _run_compute(job_id: str, req: ComputeRequest):
             rem_min=meta["rem_min"], rem_max=meta["rem_max"],
             dem_min=meta.get("dem_min"), dem_max=meta.get("dem_max"),
             river_name=meta.get("river_name"), river_length_m=meta.get("river_length_m"),
+            centerline_url=centerline_url,
         )
         _set(job_id, status="done", phase="Done", pct=100, result=resp.model_dump())
     except Exception as e:
@@ -173,6 +198,22 @@ def centerline_osm(req: ComputeRequest):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return CenterlineResponse(geojson=geojson, river_name=name, river_length_m=round(length, 1))
+
+
+@app.post("/runs/prune", response_model=PruneResponse)
+def prune_runs(req: PruneRequest):
+    """Return the subset of the client's run COG paths that still exist on disk.
+
+    The client stores runs in localStorage; after a container rebuild the COGs may
+    be gone. The client posts its known relative /cogs paths and drops any not
+    returned here. Paths are constrained to COG_DIR (no traversal)."""
+    existing: list[str] = []
+    root = os.path.abspath(COG_DIR)
+    for rel in req.paths:
+        fp = os.path.abspath(os.path.join(COG_DIR, rel))
+        if fp.startswith(root) and os.path.exists(fp):
+            existing.append(rel)
+    return PruneResponse(existing=existing)
 
 
 @app.post("/upload")

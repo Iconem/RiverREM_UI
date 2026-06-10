@@ -13,6 +13,7 @@ export type Run = {
   ramp: string;
   reverse?: boolean;
   name?: string | null;
+  cl?: string | null; // centerline GeoJSON url (backend-hosted, shareable)
   ts: number;
 };
 
@@ -40,6 +41,13 @@ export function removeRun(id: string): Run[] {
 
 export function updateRun(id: string, patch: Partial<Run>): Run[] {
   const all = listRuns().map((r) => (r.id === id ? { ...r, ...patch } : r));
+  localStorage.setItem(KEY, JSON.stringify(all));
+  return all;
+}
+
+/** Keep only runs for which `keep(run)` is true (used to drop stale backend COGs). */
+export function pruneRuns(keep: (r: Run) => boolean): Run[] {
+  const all = listRuns().filter(keep);
   localStorage.setItem(KEY, JSON.stringify(all));
   return all;
 }

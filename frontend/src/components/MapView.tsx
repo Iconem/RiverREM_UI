@@ -166,13 +166,18 @@ export function MapView({
   // Oversampling: render the GL canvas at (factor × device DPR), capped, to
   // supersample away blockiness on hi-res / 4K displays. This is the practical
   // lever for color-relief since MapLibre has no `raster-resampling` for it yet
-  // (see maplibre-gl-js#7154). Combined with the 512px source tiles above.
+  // (see maplibre-gl-js#7154). NOTE: the real detail ceiling is the COG's own
+  // resolution — oversampling past it only anti-aliases, it can't invent pixels.
   useEffect(() => {
     const map = mapRef.current?.getMap();
     if (!map || !ready) return;
     const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    const ratio = Math.min(4, Math.max(1, opts.oversample) * dpr);
+    // oversample is an absolute backing-store target (×) so 1/2/4 are distinct
+    // regardless of device DPR; floored at the native DPR so we never downsample.
+    const ratio = Math.min(8, Math.max(opts.oversample, dpr));
     map.setPixelRatio(ratio);
+    map.resize();          // re-cover tiles + resize the backing store at the new ratio
+    map.triggerRepaint();
   }, [opts.oversample, ready]);
 
   // Pick mode: click to sample REM/DEM elevation; cursor feedback.

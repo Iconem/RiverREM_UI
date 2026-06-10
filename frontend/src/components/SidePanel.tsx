@@ -29,6 +29,15 @@ function Swatch({ ramp, reverse = false }: { ramp: string; reverse?: boolean }) 
   return <span className="inline-block h-3 w-8 shrink-0 rounded-sm" style={{ background: rampCss(ramp, reverse) }} />;
 }
 
+function FoldHeader({ label, folded, onClick }: { label: string; folded: boolean; onClick: () => void }) {
+  return (
+    <button className="flex w-full items-center justify-between" onClick={onClick}>
+      <Label className="cursor-pointer">{label}</Label>
+      {folded ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+    </button>
+  );
+}
+
 function Progress({ active, label, pct }: { active: boolean; label: string; pct: number }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
@@ -71,20 +80,17 @@ export function SidePanel(p: {
   const [ui, setUi] = useUiState();
   const fileRef = useRef<HTMLInputElement>(null);
   const [cogUrl, setCogUrl] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [geoQ, setGeoQ] = useState("");
 
-  // Smart slider bounds from the computed REM range.
-  // Slider bounds must always span the active layer's data range AND the current
-  // selection, in both log and linear, so switching modes never traps a value
-  // out of reach.
+  // Slider bounds always span the active layer's data range AND the current
+  // selection, in both log and linear; min floor is at least -1.
   const isDem = p.layer === "dem";
   const dataMin = result ? Math.floor(isDem ? result.dem_min ?? result.rem_min : result.rem_min) : 0;
   const dataMax = result ? Math.ceil(isDem ? result.dem_max ?? result.rem_max : result.rem_max) : 10;
-  const linLo = Math.min(0, dataMin, opts.min);
+  const linLo = Math.min(-1, dataMin, opts.min);
   const linHi = Math.max(dataMax, opts.max, Math.ceil((dataMax - Math.min(0, dataMin)) * 2), 1);
   const logLo = -1;
   const logHi = Math.max(1, Math.ceil(Math.log10(Math.max(10, linHi))));
@@ -94,12 +100,16 @@ export function SidePanel(p: {
   const sMax = opts.log ? logHi : linHi;
 
   const share = () => { p.onShare(); setCopied(true); setTimeout(() => setCopied(false), 3000); };
+  const flipLayer = () => p.onSetLayer(p.layer === "rem" ? "dem" : "rem");
 
-  if (collapsed) {
+  const cardBase =
+    "pointer-events-auto absolute left-4 top-4 z-50 w-[360px] shadow-2xl backdrop-blur supports-[backdrop-filter]:bg-background/85";
+
+  if (ui.collapsed) {
     return (
-      <Card className="pointer-events-auto absolute left-4 top-4 z-50 flex items-center gap-2 px-3 py-2 shadow-2xl backdrop-blur supports-[backdrop-filter]:bg-background/85">
-        <span className="font-sans text-sm font-semibold tracking-tight">River REM</span>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setCollapsed(false)} aria-label="expand">
+      <Card className={`${cardBase} flex items-center justify-between px-4 py-2`}>
+        <span className="font-sans text-base font-semibold tracking-tight">River REM</span>
+        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setUi({ collapsed: false })} aria-label="expand">
           <ChevronDown className="h-4 w-4" />
         </Button>
       </Card>
@@ -107,13 +117,13 @@ export function SidePanel(p: {
   }
 
   return (
-    <Card className="pointer-events-auto absolute left-4 top-4 z-50 flex max-h-[calc(100vh-2rem)] w-[360px] flex-col gap-4 overflow-y-auto p-4 shadow-2xl backdrop-blur supports-[backdrop-filter]:bg-background/85">
+    <Card className={`${cardBase} panel-scroll flex max-h-[calc(100vh-2rem)] flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0`}>
       <div className="flex items-start justify-between">
         <div>
           <div className="font-sans text-base font-semibold tracking-tight">River REM</div>
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">viewport · terrain → detrend → cog</div>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setCollapsed(true)} aria-label="collapse">
+        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setUi({ collapsed: true })} aria-label="collapse">
           <ChevronUp className="h-4 w-4" />
         </Button>
       </div>
@@ -122,11 +132,8 @@ export function SidePanel(p: {
       <div className="relative">
         <div className="flex items-center gap-2">
           <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <Input
-            placeholder="Search a place…"
-            value={geoQ}
-            onChange={(e) => { setGeoQ(e.target.value); p.onGeocode(e.target.value); }}
-          />
+          <Input placeholder="Search a place…" value={geoQ}
+            onChange={(e) => { setGeoQ(e.target.value); p.onGeocode(e.target.value); }} />
         </div>
         {p.geoHits.length > 0 && (
           <div className="absolute z-[60] mt-1 w-full overflow-hidden rounded-md border border-border bg-background shadow-lg">
@@ -143,69 +150,46 @@ export function SidePanel(p: {
 
       <Separator />
 
-      {/* Basemap */}
-      <div className="flex items-center justify-between">
-        <Label>Basemap</Label>
-        <div className="w-48">
-          <Select value={opts.base} onValueChange={(v) => setOpts({ base: v as Opts["base"] })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="dark">Dark (OSM)</SelectItem>
-              <SelectItem value="satellite">Satellite (Esri)</SelectItem>
-              <SelectItem value="hillshade">Hillshade (Mapterhorn)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <Separator />
-
       {/* Centerline (foldable; folded by default) */}
       <div className="space-y-2">
-        <button className="flex w-full items-center justify-between" onClick={() => setUi({ foldCl: !ui.foldCl })}>
-          <Label className="cursor-pointer">Centerline</Label>
-          {ui.foldCl ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-        </button>
+        <FoldHeader label="Centerline" folded={ui.foldCl} onClick={() => setUi({ foldCl: !ui.foldCl })} />
         {!ui.foldCl && (<>
-        <Tabs value={opts.mode} onValueChange={(v) => setOpts({ mode: v as Opts["mode"] })}>
-          <TabsList>
-            <TabsTrigger value="osm"><Waves className="mr-1 h-3 w-3" />OSM</TabsTrigger>
-            <TabsTrigger value="geojson"><Pencil className="mr-1 h-3 w-3" />Draw</TabsTrigger>
-            <TabsTrigger value="shapefile"><Upload className="mr-1 h-3 w-3" />File</TabsTrigger>
-          </TabsList>
-        </Tabs>
-
-        {opts.mode === "osm" && (
-          <>
-            <div className="flex items-center justify-between gap-2">
-              <Label>Endpoint</Label>
-              <div className="w-44">
-                <Select value={opts.osm} onValueChange={(v) => setOpts({ osm: v })}>
-                  <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {OVERPASS_PRESETS.map((o) => <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+          <Tabs value={opts.mode} onValueChange={(v) => setOpts({ mode: v as Opts["mode"] })}>
+            <TabsList>
+              <TabsTrigger value="osm"><Waves className="mr-1 h-3 w-3" />OSM</TabsTrigger>
+              <TabsTrigger value="geojson"><Pencil className="mr-1 h-3 w-3" />Draw</TabsTrigger>
+              <TabsTrigger value="shapefile"><Upload className="mr-1 h-3 w-3" />File</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {opts.mode === "osm" && (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <Label>Endpoint</Label>
+                <div className="w-44">
+                  <Select value={opts.osm} onValueChange={(v) => setOpts({ osm: v })}>
+                    <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {OVERPASS_PRESETS.map((o) => <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            </div>
-            <Button variant="outline" size="sm" className="w-full" onClick={p.onPreview} disabled={busy}>
-              Preview longest river
-            </Button>
-          </>
-        )}
-        {opts.mode === "geojson" && (
-          <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">Click on the map to draw a centerline. Double-click to finish.</p>
-        )}
-        {opts.mode === "shapefile" && (
-          <>
-            <Button variant="outline" size="sm" className="w-full" onClick={() => fileRef.current?.click()}>Upload .geojson / .shp (zip)</Button>
-            <input ref={fileRef} type="file" accept=".geojson,.json,.zip,.shp" className="hidden"
-              onChange={(e) => e.target.files?.[0] && p.onUpload(e.target.files[0])} />
-          </>
-        )}
-        {p.previewInfo && (
-          <p className="font-mono text-[10px] text-muted-foreground">{p.previewInfo.river_name} · {(p.previewInfo.river_length_m / 1000).toFixed(1)} km</p>
-        )}
+              <Button variant="outline" size="sm" className="w-full" onClick={p.onPreview} disabled={busy}>Preview longest river</Button>
+            </>
+          )}
+          {opts.mode === "geojson" && (
+            <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">Click on the map to draw a centerline. Double-click to finish.</p>
+          )}
+          {opts.mode === "shapefile" && (
+            <>
+              <Button variant="outline" size="sm" className="w-full" onClick={() => fileRef.current?.click()}>Upload .geojson / .shp (zip)</Button>
+              <input ref={fileRef} type="file" accept=".geojson,.json,.zip,.shp" className="hidden"
+                onChange={(e) => e.target.files?.[0] && p.onUpload(e.target.files[0])} />
+            </>
+          )}
+          {p.previewInfo && (
+            <p className="font-mono text-[10px] text-muted-foreground">{p.previewInfo.river_name} · {(p.previewInfo.river_length_m / 1000).toFixed(1)} km</p>
+          )}
         </>)}
       </div>
 
@@ -219,7 +203,7 @@ export function SidePanel(p: {
         </Tabs>
       </div>
 
-      <Button className="w-full" onClick={p.onCompute} disabled={busy}>
+      <Button className="h-10 w-full" onClick={p.onCompute} disabled={busy}>
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
         {busy ? "Computing…" : "Compute REM"}
       </Button>
@@ -227,96 +211,78 @@ export function SidePanel(p: {
 
       {result && p.hasDem && (
         <div className="flex items-center justify-between">
-          <Label>Layer</Label>
-          <Tabs value={p.layer} onValueChange={(v) => p.onSetLayer(v as "rem" | "dem")}>
-            <TabsList className="w-auto">
-              <TabsTrigger value="rem" className="px-3">REM</TabsTrigger>
-              <TabsTrigger value="dem" className="px-3">DEM</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <Label>Layer (click to flip)</Label>
+          <div className="inline-flex overflow-hidden rounded-md border border-border text-xs font-medium">
+            {(["rem", "dem"] as const).map((l) => (
+              <button key={l} onClick={flipLayer}
+                className={`px-3 py-1 transition-colors ${p.layer === l ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}>
+                {l.toUpperCase()}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
       <Separator />
 
-      {/* Styling (foldable; oversample lives here) */}
+      {/* Colour ramp (foldable; oversample lives here) */}
       <div className="space-y-3">
-        <button className="flex w-full items-center justify-between" onClick={() => setUi({ foldRamp: !ui.foldRamp })}>
-          <Label className="cursor-pointer">Colour ramp</Label>
-          {ui.foldRamp ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-        </button>
+        <FoldHeader label="Colour ramp" folded={ui.foldRamp} onClick={() => setUi({ foldRamp: !ui.foldRamp })} />
         {!ui.foldRamp && (<>
-        <div className="space-y-2">
+          <div className="space-y-2">
+            <div className="flex items-center justify-end gap-2">
+              <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
+              <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
+            </div>
+            <Select value={opts.ramp} onValueChange={(v) => setOpts({ ramp: v as Opts["ramp"] })}>
+              <SelectTrigger><span className="flex items-center gap-2"><Swatch ramp={opts.ramp} reverse={opts.reverse} />{opts.ramp}</span></SelectTrigger>
+              <SelectContent>
+                {RAMP_NAMES.map((n) => <SelectItem key={n} value={n}><span className="flex items-center gap-2"><Swatch ramp={n} reverse={opts.reverse} />{n}</span></SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <div className="h-3 w-full rounded-sm border border-border" style={{ background: rampCss(opts.ramp, opts.reverse) }} />
+            <div className="flex justify-between font-mono text-[10px] text-muted-foreground"><span>{opts.min} m</span><span>{opts.max} m</span></div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1"><Label>Min (m)</Label>
+              <Input type="number" step="0.1" value={opts.min} onChange={(e) => setOpts({ min: Math.min(parseFloat(e.target.value), opts.max - 0.1) })} /></div>
+            <div className="space-y-1"><Label>Max (m)</Label>
+              <Input type="number" step="0.1" value={opts.max} onChange={(e) => setOpts({ max: Math.max(parseFloat(e.target.value), opts.min + 0.1) })} /></div>
+          </div>
+
+          <Slider
+            min={sMin} max={sMax}
+            step={opts.log ? 0.02 : Math.max(0.05, (sMax - sMin) / 200)}
+            value={[toS(opts.min), toS(opts.max)]}
+            onValueChange={([a, b]) => {
+              let mn = fromS(Math.min(a, b)), mx = fromS(Math.max(a, b));
+              if (mn >= mx) mx = mn + 0.1;
+              setOpts({ min: mn, max: mx });
+            }}
+          />
           <div className="flex items-center justify-end gap-2">
-            <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
-            <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
+            <span className="font-mono text-[10px] text-muted-foreground">log</span>
+            <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
           </div>
-          <Select value={opts.ramp} onValueChange={(v) => setOpts({ ramp: v as Opts["ramp"] })}>
-            <SelectTrigger><span className="flex items-center gap-2"><Swatch ramp={opts.ramp} reverse={opts.reverse} />{opts.ramp}</span></SelectTrigger>
-            <SelectContent>
-              {RAMP_NAMES.map((n) => <SelectItem key={n} value={n}><span className="flex items-center gap-2"><Swatch ramp={n} reverse={opts.reverse} />{n}</span></SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
 
-        <div className="space-y-1">
-          <div className="h-3 w-full rounded-sm border border-border" style={{ background: rampCss(opts.ramp, opts.reverse) }} />
-          <div className="flex justify-between font-mono text-[10px] text-muted-foreground"><span>{opts.min} m</span><span>{opts.max} m</span></div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1"><Label>Min (m)</Label>
-            <Input type="number" step="0.1" value={opts.min} onChange={(e) => setOpts({ min: Math.min(parseFloat(e.target.value), opts.max - 0.1) })} /></div>
-          <div className="space-y-1"><Label>Max (m)</Label>
-            <Input type="number" step="0.1" value={opts.max} onChange={(e) => setOpts({ max: Math.max(parseFloat(e.target.value), opts.min + 0.1) })} /></div>
-        </div>
-
-        {/* Dual min/max slider; positions are exponents when log is on. */}
-        <Slider
-          min={sMin} max={sMax}
-          step={opts.log ? 0.02 : Math.max(0.05, (sMax - sMin) / 200)}
-          value={[toS(opts.min), toS(opts.max)]}
-          onValueChange={([a, b]) => {
-            let mn = fromS(Math.min(a, b)), mx = fromS(Math.max(a, b));
-            if (mn >= mx) mx = mn + 0.1;
-            setOpts({ min: mn, max: mx });
-          }}
-        />
-        <div className="flex items-center justify-end gap-2">
-          <span className="font-mono text-[10px] text-muted-foreground">log</span>
-          <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
-        </div>
-
-        <div className="flex items-center justify-between pt-1">
-          <div>
-            <Label>Oversample</Label>
-            <div className="font-mono text-[9px] text-muted-foreground">display supersampling · sharper on 4K</div>
+          <div className="flex items-center justify-between pt-1">
+            <div>
+              <Label>Oversample</Label>
+              <div className="font-mono text-[9px] text-muted-foreground">display supersampling · sharper on 4K</div>
+            </div>
+            <Tabs value={String(opts.oversample)} onValueChange={(v) => setOpts({ oversample: Number(v) })}>
+              <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-3">{r}×</TabsTrigger>)}</TabsList>
+            </Tabs>
           </div>
-          <Tabs value={String(opts.oversample)} onValueChange={(v) => setOpts({ oversample: Number(v) })}>
-            <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-3">{r}×</TabsTrigger>)}</TabsList>
-          </Tabs>
-        </div>
         </>)}
       </div>
 
       {result && (
         <>
-          <Separator />
-          {/* Pick / inspect */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <Label>Inspect</Label>
-              <Button variant={p.pickMode ? "default" : "outline"} size="sm" className="h-7 gap-1 px-2 text-xs" onClick={p.onTogglePick}>
-                <Crosshair className="h-3 w-3" />{p.pickMode ? "Picking" : "Pick value"}
-              </Button>
-            </div>
-            {p.pick && (
-              <p className="font-mono text-[10px] text-muted-foreground">
-                {p.pick.lat.toFixed(5)}, {p.pick.lng.toFixed(5)} · REM {p.pick.rem ?? "–"} m{p.pick.dem != null ? ` · DEM ${p.pick.dem} m` : ""}
-              </p>
-            )}
-          </div>
-
           <Separator />
           {/* Export */}
           <div className="space-y-2">
@@ -333,13 +299,10 @@ export function SidePanel(p: {
               <Button variant="outline" size="sm" onClick={p.onExportDem} disabled={!result.dem_url}><FileDown className="mr-1 h-3 w-3" />DEM COG</Button>
               <Button variant="outline" size="sm" onClick={p.onExportCenterline} disabled={!p.hasCenterline}><FileDown className="mr-1 h-3 w-3" />Centerline</Button>
             </div>
-            <Button
-              variant="ghost" size="sm" className="h-7 w-full gap-1 text-xs"
+            <Button variant="ghost" size="sm" className="h-7 w-full gap-1 text-xs"
               onClick={() => window.open(
                 `https://source-cooperative.github.io/cog-viewer/?url=${encodeURIComponent(result.cog_url)}&mode=single&bands=1&rescale=${result.rem_min},${result.rem_max}&panel=open`,
-                "_blank", "noreferrer"
-              )}
-            >
+                "_blank", "noreferrer")}>
               <ExternalLink className="h-3 w-3" />View REM in cog-viewer
             </Button>
           </div>
@@ -347,12 +310,49 @@ export function SidePanel(p: {
       )}
 
       <Separator />
-      <div className="space-y-2">
-        <Label>Load COG</Label>
-        <div className="flex gap-2">
-          <Input placeholder="https://…/dem.tif" value={cogUrl} onChange={(e) => setCogUrl(e.target.value)} />
-          <Button variant="outline" size="sm" onClick={() => cogUrl && p.onLoadCog(cogUrl)} disabled={busy}>Load</Button>
-        </div>
+
+      {/* Utilities (foldable; folded by default): basemap, inspect, load COG */}
+      <div className="space-y-3">
+        <FoldHeader label="Utilities" folded={ui.foldUtil} onClick={() => setUi({ foldUtil: !ui.foldUtil })} />
+        {!ui.foldUtil && (<>
+          <div className="flex items-center justify-between">
+            <Label>Basemap</Label>
+            <div className="w-44">
+              <Select value={opts.base} onValueChange={(v) => setOpts({ base: v as Opts["base"] })}>
+                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dark">Dark (OSM)</SelectItem>
+                  <SelectItem value="satellite">Satellite (Esri)</SelectItem>
+                  <SelectItem value="hillshade">Hillshade (Mapterhorn)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {result && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label>Inspect</Label>
+                <Button variant={p.pickMode ? "default" : "outline"} size="sm" className="h-7 gap-1 px-2 text-xs" onClick={p.onTogglePick}>
+                  <Crosshair className="h-3 w-3" />{p.pickMode ? "Picking" : "Pick value"}
+                </Button>
+              </div>
+              {p.pick && (
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  {p.pick.lat.toFixed(5)}, {p.pick.lng.toFixed(5)} · REM {p.pick.rem ?? "–"} m{p.pick.dem != null ? ` · DEM ${p.pick.dem} m` : ""}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label>Load COG</Label>
+            <div className="flex gap-2">
+              <Input placeholder="https://…/dem.tif" value={cogUrl} onChange={(e) => setCogUrl(e.target.value)} />
+              <Button variant="outline" size="sm" onClick={() => cogUrl && p.onLoadCog(cogUrl)} disabled={busy}>Load</Button>
+            </div>
+          </div>
+        </>)}
       </div>
 
       {p.runs.length > 0 && (
@@ -360,7 +360,7 @@ export function SidePanel(p: {
           <Separator />
           <div className="space-y-2">
             <Label><span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />Runs</span></Label>
-            <div className="max-h-44 space-y-1 overflow-y-auto">
+            <div className="panel-scroll max-h-44 space-y-1 overflow-y-auto">
               {p.runs.map((r) => {
                 const active = r.id === p.activeRunId;
                 return (

@@ -48,9 +48,16 @@ class ComputeResponse(BaseModel):
     dem_max: Optional[float] = None
     river_name: Optional[str] = None
     river_length_m: Optional[float] = None
+    centerline_url: Optional[str] = None  # backend-hosted GeoJSON, shareable with the run
 
 
-class CenterlineResponse(BaseModel):
+class PruneRequest(BaseModel):
+    """Relative /cogs paths of the client's locally-stored runs."""
+    paths: list[str] = []
+
+
+class PruneResponse(BaseModel):
+    existing: list[str] = []  # subset of `paths` whose COG still exists on disk
     """Preview of the OSM-derived centerline so the UI can show it before computing."""
     geojson: dict
     river_name: Optional[str] = None

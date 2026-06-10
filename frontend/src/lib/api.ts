@@ -25,6 +25,7 @@ export type ComputeResponse = {
   dem_max?: number | null;
   river_name: string | null;
   river_length_m: number | null;
+  centerline_url?: string | null;
 };
 
 export type JobStatus = {
@@ -86,6 +87,18 @@ export const api = {
 
   sample: (path: string, lng: number, lat: number) =>
     get<{ value: number | null }>(`/sample?path=${encodeURIComponent(path)}&lng=${lng}&lat=${lat}`),
+
+  // Given relative /cogs paths of locally-stored runs, return those still present
+  // on the backend (so the client can drop runs whose COGs vanished on rebuild).
+  prune: (paths: string[]) => post<{ existing: string[] }>("/runs/prune", { paths }),
+
+  // Fetch a run's saved centerline GeoJSON (returns null if none).
+  centerline: async (url: string): Promise<GeoJSON.GeoJSON | null> => {
+    try {
+      const r = await fetch(url);
+      return r.ok ? ((await r.json()) as GeoJSON.GeoJSON) : null;
+    } catch { return null; }
+  },
 
   upload: async (file: File) => {
     const fd = new FormData();

@@ -40,6 +40,7 @@ export function useRemOptions() {
     log: parseAsBoolean.withDefault(true),
     res: parseAsInteger.withDefault(1), // 1 | 2 | 4 resolution multiplier
     oversample: parseAsInteger.withDefault(1), // GPU supersampling factor (× device DPR)
+    layer: parseAsStringEnum(["rem", "dem"]).withDefault("rem"), // which COG is streamed
     osm: parseAsString.withDefault("https://qlever.cs.uni-freiburg.de/api/osm-planet"),
   });
 }
@@ -60,5 +61,7 @@ export function useUiState() {
   return useQueryStates({
     foldCl: parseAsBoolean.withDefault(true), // centerline options folded by default
     foldRamp: parseAsBoolean.withDefault(false),
+    foldUtil: parseAsBoolean.withDefault(true), // utilities (basemap/inspect/load) folded
+    collapsed: parseAsBoolean.withDefault(false), // whole panel collapsed
   });
 }

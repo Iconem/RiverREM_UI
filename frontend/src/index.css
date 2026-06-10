@@ -34,3 +34,23 @@
 }
 
 .maplibregl-ctrl-attrib { font-family: "IBM Plex Mono", monospace; font-size: 10px; }
+
+/* Themed thin scrollbar for the side panel + runs list (matches the UI palette
+   instead of the OS default). Firefox uses scrollbar-* ; WebKit uses the
+   pseudo-elements. Track is transparent; thumb is a muted, rounded bar. */
+.panel-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+}
+.panel-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.panel-scroll::-webkit-scrollbar-track { background: transparent; }
+.panel-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.panel-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.55);
+  background-clip: padding-box;
+}

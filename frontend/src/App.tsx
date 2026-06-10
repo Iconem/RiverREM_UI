@@ -5,7 +5,7 @@ import { SidePanel } from "@/components/SidePanel";
 import { useMapView, useRemOptions, useActiveRem } from "@/lib/state";
 import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit } from "@/lib/api";
 import { fetchLongestRiver, mergeFeatureCollection } from "@/lib/osm";
-import { listRuns, addRun, removeRun, updateRun, type Run } from "@/lib/history";
+import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
 
 function download(blob: Blob, name: string) {
   const u = URL.createObjectURL(blob);
@@ -46,7 +46,7 @@ export default function App() {
   const [remVisible, setRemVisible] = useState(true);
   const [pickMode, setPickMode] = useState(false);
   const [pick, setPick] = useState<{ lng: number; lat: number; rem: number | null; dem: number | null } | null>(null);
-  const [layer, setLayer] = useState<"rem" | "dem">("rem");
+  const layer = opts.layer; // streamed layer (rem/dem) lives in the URL
   const [remBounds, setRemBounds] = useState<{ min: number; max: number } | null>(null);
   const [demBounds, setDemBounds] = useState<{ min: number; max: number } | null>(null);
 
@@ -57,7 +57,18 @@ export default function App() {
 
   // Load saved runs + rehydrate a shared COG from the URL (once).
   useEffect(() => {
-    setRuns(listRuns());
+    const local = listRuns();
+    setRuns(local);
+    // Drop runs whose backend COG no longer exists (e.g. after a docker rebuild).
+    const paths = local.map((r) => cogPath(r.cog)).filter((x): x is string => !!x);
+    if (paths.length) {
+      api.prune(paths)
+        .then(({ existing }) => {
+          const keep = new Set(existing);
+          setRuns(pruneRuns((r) => { const pth = cogPath(r.cog); return !pth || keep.has(pth); }));
+        })
+        .catch(() => { /* offline: keep local runs as-is */ });
+    }
     if (activeRem.cog) {
       const b = activeRem.bounds.length === 4 ? (activeRem.bounds as [number, number, number, number]) : null;
       setResult({
@@ -65,6 +76,12 @@ export default function App() {
         bounds: b ?? [view.lng - 0.1, view.lat - 0.1, view.lng + 0.1, view.lat + 0.1],
         rem_min: opts.min, rem_max: opts.max, river_name: null, river_length_m: null,
       });
+      // A shared link may point at a run whose centerline is hosted alongside the COG.
+      const pth = cogPath(activeRem.cog);
+      if (pth) {
+        const clUrl = activeRem.cog.replace(/[^/]+$/, "centerline.geojson");
+        api.centerline(clUrl).then((g) => g && setCenterline(g));
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -111,7 +128,8 @@ export default function App() {
     setActiveRunId(id);
     setRuns(addRun({
       id, cog: res.cog_url, dem: res.dem_url, bounds: res.bounds,
-      min: mn, max: mx, ramp: opts.ramp, reverse: opts.reverse, name, ts: Date.now(),
+      min: mn, max: mx, ramp: opts.ramp, reverse: opts.reverse, name,
+      cl: res.centerline_url ?? null, ts: Date.now(),
     }));
   }, [opts.ramp, opts.reverse, setActiveRem]);
 
@@ -135,11 +153,12 @@ export default function App() {
         },
         (ph, p) => { setPhase(ph); setPct(displayPct(ph, p)); }
       );
-      const remB = { min: Math.floor(res.rem_min), max: Math.max(1, +(res.rem_max * 0.1).toFixed(2)) };
+      const remB = { min: -1, max: Math.max(1, +(res.rem_max * 0.1).toFixed(2)) };
       const demB = res.dem_min != null && res.dem_max != null
-        ? { min: Math.floor(res.dem_min), max: Math.ceil(res.dem_max) } : null;
-      setRemBounds(remB); setDemBounds(demB); setLayer("rem");
-      setResult(res); setOpts({ min: remB.min, max: remB.max });
+        ? { min: -1, max: Math.ceil(res.dem_max) } : null;
+      setRemBounds(remB); setDemBounds(demB);
+      setResult(res); setOpts({ min: remB.min, max: remB.max, layer: "rem" });
+      if (!cl && res.centerline_url) { const g = await api.centerline(res.centerline_url); if (g) setCenterline(g); }
       await recordRun(res, remB.min, remB.max);
     } catch (e) { alert(`Compute failed: ${(e as Error).message}`); }
     finally { setBusy(false); setPhase(""); setPct(0); }
@@ -153,27 +172,27 @@ export default function App() {
         job_id: "external", cog_url: r.cog_url, dem_url: null, bounds: r.bounds,
         rem_min: r.rem_min, rem_max: r.rem_max, river_name: null, river_length_m: null,
       };
-      const remB = { min: Math.floor(r.rem_min), max: Math.ceil(r.rem_max) };
-      setRemBounds(remB); setDemBounds(null); setLayer("rem");
-      setResult(res); setOpts({ min: remB.min, max: remB.max });
+      const remB = { min: -1, max: Math.ceil(r.rem_max) };
+      setRemBounds(remB); setDemBounds(null); setCenterline(null);
+      setResult(res); setOpts({ min: remB.min, max: remB.max, layer: "rem" });
       await recordRun(res, remB.min, remB.max);
     } catch (e) { alert(`Could not load COG: ${(e as Error).message}`); }
     finally { setBusy(false); setPhase(""); setPct(0); }
   }, [setOpts, recordRun]);
 
   const onLoadRun = useCallback((r: Run) => {
-    setResult({ job_id: r.id, cog_url: r.cog, dem_url: r.dem, bounds: r.bounds, rem_min: r.min, rem_max: r.max, river_name: r.name ?? null, river_length_m: null });
+    setResult({ job_id: r.id, cog_url: r.cog, dem_url: r.dem, bounds: r.bounds, rem_min: r.min, rem_max: r.max, river_name: r.name ?? null, river_length_m: null, centerline_url: r.cl ?? null });
     setActiveRem({ cog: r.cog, dem: r.dem || "", bounds: r.bounds });
     setActiveRunId(r.id); setRemVisible(true);
-    setLayer("rem"); setRemBounds({ min: r.min, max: r.max }); setDemBounds(null);
-    setOpts({ ramp: r.ramp as any, reverse: !!r.reverse, min: r.min, max: r.max });
+    setRemBounds({ min: r.min, max: r.max }); setDemBounds(null);
+    setOpts({ ramp: r.ramp as any, reverse: !!r.reverse, min: r.min, max: r.max, layer: "rem" });
+    if (r.cl) api.centerline(r.cl).then(setCenterline); else setCenterline(null);
   }, [setActiveRem, setOpts]);
 
   // Switch streamed layer (REM vs DEM) and apply that layer's stored bounds.
   const onSetLayer = useCallback((l: "rem" | "dem") => {
-    setLayer(l);
     const b = l === "dem" ? demBounds : remBounds;
-    if (b) setOpts({ min: b.min, max: b.max });
+    setOpts(b ? { layer: l, min: b.min, max: b.max } : { layer: l });
   }, [demBounds, remBounds, setOpts]);
 
   // Persist slider/min/max edits into the active layer's bounds.
@@ -239,7 +258,7 @@ export default function App() {
   }, []);
   const onFlyTo = useCallback((lng: number, lat: number) => {
     setGeoHits([]);
-    mapRef.current?.flyTo({ center: [lng, lat], zoom: Math.max(mapRef.current.getZoom(), 12) });
+    mapRef.current?.flyTo({ center: [lng, lat], zoom: Math.max(mapRef.current.getZoom(), 12), duration: 500 });
   }, []);
 
   return (
