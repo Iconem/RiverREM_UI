@@ -49,6 +49,11 @@ class ComputeResponse(BaseModel):
     river_name: Optional[str] = None
     river_length_m: Optional[float] = None
     centerline_url: Optional[str] = None  # backend-hosted GeoJSON, shareable with the run
+    # Zoom decision from the DEM build, so the UI can explain when the resolution
+    # multiplier was capped by the terrain source.
+    source_max_zoom: Optional[int] = None  # deepest zoom Mapterhorn serves at this spot
+    dem_zoom: Optional[int] = None         # zoom actually fetched (clamped)
+    requested_zoom: Optional[int] = None   # screen zoom + multiplier
 
 
 class PruneRequest(BaseModel):

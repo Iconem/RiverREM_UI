@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Upload, Pencil, Waves, Play, Loader2, Download, Share2, Layers, Trash2, FileDown,
   Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, ChevronRight, Crosshair, ExternalLink,
+  List, LayoutGrid, ImageOff,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ type Opts = {
   mode: "osm" | "geojson" | "shapefile";
   base: "dark" | "satellite" | "hillshade";
   ramp: (typeof RAMP_NAMES)[number];
-  reverse: boolean; min: number; max: number; log: boolean; res: number; oversample: number; osm: string;
+  reverse: boolean; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; osm: string;
 };
 
 function Swatch({ ramp, reverse = false }: { ramp: string; reverse?: boolean }) {
@@ -63,6 +64,7 @@ function Progress({ active, label, pct }: { active: boolean; label: string; pct:
 export function SidePanel(p: {
   opts: Opts; setOpts: (o: Partial<Opts>) => void;
   busy: boolean; phase: string; pct: number;
+  resNote: string | null;
   result: ComputeResponse | null; hasCenterline: boolean;
   layer: "rem" | "dem"; hasDem: boolean; onSetLayer: (l: "rem" | "dem") => void;
   previewInfo: { river_name: string; river_length_m: number } | null;
@@ -209,6 +211,9 @@ export function SidePanel(p: {
         {busy ? "Computing…" : "Compute REM"}
       </Button>
       <Progress active={busy} label={p.phase} pct={p.pct} />
+      {!busy && p.resNote && (
+        <p className="font-mono text-[10px] leading-relaxed text-amber-500/90">{p.resNote}</p>
+      )}
 
       {result && p.hasDem && (
         <div className="flex items-center justify-between">
@@ -269,16 +274,6 @@ export function SidePanel(p: {
             <span className="font-mono text-[10px] text-muted-foreground">log</span>
             <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
           </div>
-
-          <div className="flex items-center justify-between pt-1">
-            <div>
-              <Label>Oversample</Label>
-              <div className="font-mono text-[9px] text-muted-foreground">display supersampling · sharper on 4K</div>
-            </div>
-            <Tabs value={String(opts.oversample)} onValueChange={(v) => setOpts({ oversample: Number(v) })}>
-              <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-3">{r}×</TabsTrigger>)}</TabsList>
-            </Tabs>
-          </div>
         </>)}
       </div>
 
@@ -334,6 +329,17 @@ export function SidePanel(p: {
             </div>
           </div>
 
+          <div className="flex items-center justify-between">
+            <Label>Relief overlay</Label>
+            <Tabs value={opts.hillshade} onValueChange={(v) => setOpts({ hillshade: v as Opts["hillshade"] })}>
+              <TabsList className="w-auto">
+                <TabsTrigger value="off" className="px-2">Off</TabsTrigger>
+                <TabsTrigger value="dark" className="px-2">Dark</TabsTrigger>
+                <TabsTrigger value="light" className="px-2">Light</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+
           {result && (
             <div className="space-y-1">
               <div className="flex items-center justify-between">
@@ -344,7 +350,7 @@ export function SidePanel(p: {
               </div>
               {p.pick && (
                 <p className="font-mono text-[10px] text-muted-foreground">
-                  {p.pick.lat.toFixed(5)}, {p.pick.lng.toFixed(5)} · REM {p.pick.rem ?? "–"} m{p.pick.dem != null ? ` · DEM ${p.pick.dem} m` : ""}
+                  DEM {p.pick.dem ?? "–"} m · REM {p.pick.rem ?? "–"} m · {p.pick.lat.toFixed(5)}, {p.pick.lng.toFixed(5)}
                 </p>
               )}
             </div>
@@ -364,42 +370,102 @@ export function SidePanel(p: {
         <>
           <Separator />
           <div className="space-y-2">
-            <Label><span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />Runs</span></Label>
-            <div className="panel-scroll max-h-44 space-y-1 overflow-y-auto">
-              {p.runs.map((r) => {
-                const active = r.id === p.activeRunId;
-                return (
-                  <div key={r.id} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 ${active ? "border-foreground/40" : "border-border"}`}>
-                    {active && (
-                      <button onClick={p.onToggleLayer} aria-label="toggle layer" className="text-muted-foreground hover:text-foreground">
-                        {p.remVisible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                      </button>
-                    )}
-                    {editId === r.id ? (
-                      <input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") { p.onRenameRun(r.id, editName); setEditId(null); } if (e.key === "Escape") setEditId(null); }}
-                        className="min-w-0 flex-1 bg-transparent font-mono text-[11px] outline-none" />
-                    ) : (
-                      <button className="min-w-0 flex-1 text-left" onClick={() => p.onLoadRun(r)}>
-                        <div className="truncate font-mono text-[11px]">{r.name || r.id.slice(0, 8)}</div>
-                        <div className="font-mono text-[9px] text-muted-foreground">{new Date(r.ts).toLocaleString()} · {r.min}–{r.max} m</div>
-                      </button>
-                    )}
-                    {editId === r.id ? (
-                      <>
-                        <button onClick={() => { p.onRenameRun(r.id, editName); setEditId(null); }} className="text-muted-foreground hover:text-foreground"><Check className="h-3.5 w-3.5" /></button>
-                        <button onClick={() => setEditId(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={() => { setEditId(r.id); setEditName(r.name || ""); }} aria-label="rename" className="text-muted-foreground hover:text-foreground"><Pencil className="h-3 w-3" /></button>
-                        <button onClick={() => p.onDeleteRun(r.id)} aria-label="delete" className="text-muted-foreground hover:text-foreground"><Trash2 className="h-3 w-3" /></button>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="flex items-center justify-between">
+              <Label><span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />Runs</span></Label>
+              <div className="inline-flex overflow-hidden rounded-md border border-border">
+                {([["list", List], ["gallery", LayoutGrid]] as const).map(([v, Icon]) => (
+                  <button key={v} onClick={() => setUi({ runsView: v })}
+                    className={`px-2 py-1 ${ui.runsView === v ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}
+                    aria-label={v}>
+                    <Icon className="h-3.5 w-3.5" />
+                  </button>
+                ))}
+              </div>
             </div>
+
+            {ui.runsView === "gallery" ? (
+              <div className="panel-scroll max-h-[28rem] space-y-2 overflow-y-auto">
+                {p.runs.map((r) => {
+                  const active = r.id === p.activeRunId;
+                  return (
+                    <div key={r.id} className={`overflow-hidden rounded-md border ${active ? "border-foreground/40" : "border-border"}`}>
+                      <button className="block w-full" onClick={() => p.onLoadRun(r)} aria-label="load run">
+                        {r.thumb ? (
+                          <img src={r.thumb} alt="" className="h-24 w-full object-cover" />
+                        ) : (
+                          <div className="flex h-24 w-full items-center justify-center bg-muted/60">
+                            <ImageOff className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                        )}
+                      </button>
+                      <div className="flex items-center gap-1.5 px-2 py-1">
+                        {active && (
+                          <button onClick={p.onToggleLayer} aria-label="toggle layer" className="text-muted-foreground hover:text-foreground">
+                            {p.remVisible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
+                        {editId === r.id ? (
+                          <input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") { p.onRenameRun(r.id, editName); setEditId(null); } if (e.key === "Escape") setEditId(null); }}
+                            className="min-w-0 flex-1 bg-transparent font-mono text-[11px] outline-none" />
+                        ) : (
+                          <button className="min-w-0 flex-1 truncate text-left font-mono text-[11px]" onClick={() => p.onLoadRun(r)}>
+                            {r.name || r.id.slice(0, 8)}
+                          </button>
+                        )}
+                        {editId === r.id ? (
+                          <>
+                            <button onClick={() => { p.onRenameRun(r.id, editName); setEditId(null); }} className="text-muted-foreground hover:text-foreground"><Check className="h-3.5 w-3.5" /></button>
+                            <button onClick={() => setEditId(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { setEditId(r.id); setEditName(r.name || ""); }} aria-label="rename" className="text-muted-foreground hover:text-foreground"><Pencil className="h-3 w-3" /></button>
+                            <button onClick={() => p.onDeleteRun(r.id)} aria-label="delete" className="text-muted-foreground hover:text-foreground"><Trash2 className="h-3 w-3" /></button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="panel-scroll max-h-44 space-y-1 overflow-y-auto">
+                {p.runs.map((r) => {
+                  const active = r.id === p.activeRunId;
+                  return (
+                    <div key={r.id} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 ${active ? "border-foreground/40" : "border-border"}`}>
+                      {active && (
+                        <button onClick={p.onToggleLayer} aria-label="toggle layer" className="text-muted-foreground hover:text-foreground">
+                          {p.remVisible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                        </button>
+                      )}
+                      {editId === r.id ? (
+                        <input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") { p.onRenameRun(r.id, editName); setEditId(null); } if (e.key === "Escape") setEditId(null); }}
+                          className="min-w-0 flex-1 bg-transparent font-mono text-[11px] outline-none" />
+                      ) : (
+                        <button className="min-w-0 flex-1 text-left" onClick={() => p.onLoadRun(r)}>
+                          <div className="truncate font-mono text-[11px]">{r.name || r.id.slice(0, 8)}</div>
+                          <div className="font-mono text-[9px] text-muted-foreground">{new Date(r.ts).toLocaleString()} · {r.min}–{r.max} m</div>
+                        </button>
+                      )}
+                      {editId === r.id ? (
+                        <>
+                          <button onClick={() => { p.onRenameRun(r.id, editName); setEditId(null); }} className="text-muted-foreground hover:text-foreground"><Check className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => setEditId(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => { setEditId(r.id); setEditName(r.name || ""); }} aria-label="rename" className="text-muted-foreground hover:text-foreground"><Pencil className="h-3 w-3" /></button>
+                          <button onClick={() => p.onDeleteRun(r.id)} aria-label="delete" className="text-muted-foreground hover:text-foreground"><Trash2 className="h-3 w-3" /></button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </>
       )}

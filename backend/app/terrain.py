@@ -105,22 +105,23 @@ def max_available_zoom(lon: float, lat: float, ceiling: int | None = None) -> in
     return _max_zoom_cached(round(lon, 3), round(lat, 3), ceiling or TERRAIN_MAX_ZOOM)
 
 
-def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str) -> str:
+def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str) -> dict:
     """Fetch terrain tiles for `bbox`, decode, mosaic, reproject to UTM, write GeoTIFF.
 
-    `bbox` has .west/.south/.east/.north in WGS84 degrees.
-    Returns the path to the written DEM (single-band float32, UTM, metres).
+    `bbox` has .west/.south/.east/.north in WGS84 degrees. The DEM is fetched at
+    `zoom + log2(multiplier)`, clamped to the deepest zoom the source actually
+    serves here — we never upsample beyond the source, so a multiplier past the
+    source's ceiling is a no-op (the UI uses `source_max_zoom` to warn about that).
+
+    Returns a dict: path + the zoom decision (source_max_zoom / dem_zoom / requested_zoom).
     """
     cx0 = (bbox.west + bbox.east) / 2.0
     cy0 = (bbox.south + bbox.north) / 2.0
-    # `want_z` is the resolution the user asked for (screen zoom + the multiplier).
-    # `fetch_z` is the deepest zoom Mapterhorn actually serves here. We fetch at
-    # fetch_z but always render the OUTPUT grid at want_z, upsampling when the
-    # source is shallower — so the multiplier is never a silent no-op (it adds
-    # real detail where the source has it, a finer interpolation grid where not).
+    # want_z = the resolution requested (screen zoom + multiplier); source_max = the
+    # deepest zoom Mapterhorn serves here; z = the clamp (no upsampling past source).
     want_z = zoom + int(math.log2(resolution_multiplier))
-    fetch_z = min(want_z, max_available_zoom(cx0, cy0))
-    z = fetch_z
+    source_max = max_available_zoom(cx0, cy0)
+    z = min(want_z, source_max)
     x0, y0 = _lonlat_to_tile(bbox.west, bbox.north, z)
     x1, y1 = _lonlat_to_tile(bbox.east, bbox.south, z)
     xs = range(min(x0, x1), max(x0, x1) + 1)
@@ -181,33 +182,23 @@ def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str) -> str
     utm_zone = int((cx + 180) / 6) + 1
     epsg_utm = (32600 if cy >= 0 else 32700) + utm_zone
 
-    # Output pixel size targets `want_z` (not the possibly-shallower fetch_z), so
-    # the resolution multiplier always scales the DEM grid. Web-Mercator metres
-    # are scaled by cos(lat) to approximate true ground metres in UTM.
-    merc_px_want = (2 * math.pi * 6378137.0) / (2 ** want_z) / ts
-    utm_px = max(0.05, merc_px_want * math.cos(math.radians(cy)))
-
-    # Upsampling (fetch_z < want_z) multiplies the output grid by 4^dz; guard it so
-    # RiverREM's interpolation doesn't crawl / OOM on an oversized DEM.
-    dz = max(0, want_z - fetch_z)
-    out_px = (cols * (2 ** dz)) * (rows * (2 ** dz))
-    if out_px > 60_000_000:
-        raise ValueError(
-            f"{resolution_multiplier}x here would make a {out_px/1e6:.0f} MP DEM "
-            f"(source z{fetch_z} upsampled to z{want_z}). Zoom in or lower the multiplier."
-        )
     _log.info(
-        "DEM build: screen z%d, want z%d, fetched z%d, output %.2f m/px (%dx)",
-        zoom, want_z, fetch_z, utm_px, resolution_multiplier,
+        "DEM build: screen z%d, requested z%d, source max z%d, fetched z%d (%dx)",
+        zoom, want_z, source_max, z, resolution_multiplier,
     )
 
     gdal.Warp(
         out_path, mem,
         dstSRS=f"EPSG:{epsg_utm}",
-        xRes=utm_px, yRes=utm_px,
         resampleAlg="bilinear",
         srcNodata=-9999.0, dstNodata=-9999.0,
         format="GTiff",
     )
     mem = None
-    return out_path
+    return {
+        "path": out_path,
+        "source_max_zoom": source_max,
+        "dem_zoom": z,
+        "requested_zoom": want_z,
+        "screen_zoom": zoom,
+    }

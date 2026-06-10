@@ -68,16 +68,17 @@ const BASE_LAYERS: Record<string, string[]> = {
   dark: ["carto-dark"], satellite: ["esri-sat"], hillshade: ["mapterhorn-hillshade"],
 };
 
-type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number };
+type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number; hillshade: string };
 
 export function MapView({
-  initialView, opts, cogUrl, cogBounds, preview, remVisible, pickMode,
+  initialView, opts, cogUrl, cogBounds, fitSignal, preview, remVisible, pickMode,
   onBounds, onView, onDrawn, onMapReady, onPick,
 }: {
   initialView: { lng: number; lat: number; zoom: number };
   opts: Opts;
   cogUrl: string | null;
   cogBounds: [number, number, number, number] | null;
+  fitSignal: number;
   preview: GeoJSON.GeoJSON | null;
   remVisible: boolean;
   pickMode: boolean;
@@ -134,9 +135,40 @@ export function MapView({
       paint: { "color-relief-color": colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse) as any, "color-relief-opacity": 0.95 },
     } as any);
     remRef.current = { src, layer };
-    if (cogBounds) map.fitBounds(cogBounds, { padding: 40, duration: 600 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cogUrl, ready]);
+
+  // Fit the camera to the COG only on an explicit signal (run load / compute
+  // complete) — never on a plain REM/DEM layer toggle, which also changes cogUrl.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready || !cogBounds || !fitSignal) return;
+    map.fitBounds(cogBounds, { padding: 40, duration: 600 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitSignal, ready]);
+
+  // Mapterhorn hillshade overlay, rendered ABOVE the REM/DEM tint (MapLibre can't
+  // multiply-blend yet, so we offer a transparent dark or light relief instead).
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready) return;
+    const id = "hillshade-overlay";
+    if (opts.hillshade === "off") {
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
+      return;
+    }
+    if (!map.getLayer(id)) {
+      map.addLayer({ id, type: "hillshade", source: "mapterhorn-dem", paint: {} } as any);
+    }
+    const dark = opts.hillshade === "dark";
+    map.setPaintProperty(id, "hillshade-shadow-color", dark ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0)");
+    map.setPaintProperty(id, "hillshade-highlight-color", dark ? "rgba(0,0,0,0)" : "rgba(255,255,255,0.65)");
+    map.setPaintProperty(id, "hillshade-accent-color", "rgba(0,0,0,0)");
+    map.setPaintProperty(id, "hillshade-exaggeration", 0.5);
+    map.setLayoutProperty(id, "visibility", "visible");
+    map.moveLayer(id); // keep it topmost, above the freshly (re)added color-relief
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts.hillshade, ready, cogUrl]);
 
   // Live recolour — just update the paint expression (GPU, instant).
   useEffect(() => {
@@ -215,8 +247,9 @@ export function MapView({
     <Map
       ref={mapRef}
       mapLib={maplibregl as never}
-      initialViewState={{ longitude: initialView.lng, latitude: initialView.lat, zoom: initialView.zoom }}
+      initialViewState={{ longitude: initialView.lng, latitude: initialView.lat, zoom: initialView.zoom, pitch: 0 }}
       mapStyle={STYLE}
+      maxPitch={0}
       canvasContextAttributes={{ preserveDrawingBuffer: true }}
       onLoad={() => {
         ensureProtocol();

@@ -41,6 +41,7 @@ export function useRemOptions() {
     res: parseAsInteger.withDefault(1), // 1 | 2 | 4 resolution multiplier
     oversample: parseAsInteger.withDefault(1), // GPU supersampling factor (× device DPR)
     layer: parseAsStringEnum(["rem", "dem"]).withDefault("rem"), // which COG is streamed
+    hillshade: parseAsStringEnum(["off", "dark", "light"]).withDefault("off"), // Mapterhorn relief overlay
     osm: parseAsString.withDefault("https://qlever.cs.uni-freiburg.de/api/osm-planet"),
   });
 }
@@ -63,5 +64,6 @@ export function useUiState() {
     foldRamp: parseAsBoolean.withDefault(false),
     foldUtil: parseAsBoolean.withDefault(true), // utilities (basemap/inspect/load) folded
     collapsed: parseAsBoolean.withDefault(false), // whole panel collapsed
+    runsView: parseAsStringEnum(["list", "gallery"]).withDefault("list"),
   });
 }

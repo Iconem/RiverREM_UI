@@ -129,7 +129,7 @@ def _run_compute(job_id: str, req: ComputeRequest):
     try:
         _set(job_id, phase="Fetching terrain tiles", pct=0)
         dem_path = os.path.join(job_dir, "dem.tif")
-        build_dem(req.bbox, req.zoom, req.resolution_multiplier, dem_path)
+        dem_info = build_dem(req.bbox, req.zoom, req.resolution_multiplier, dem_path)
 
         _set(job_id, phase="Resolving centerline")
         centerline_shp = None
@@ -183,6 +183,9 @@ def _run_compute(job_id: str, req: ComputeRequest):
             dem_min=meta.get("dem_min"), dem_max=meta.get("dem_max"),
             river_name=meta.get("river_name"), river_length_m=meta.get("river_length_m"),
             centerline_url=centerline_url,
+            source_max_zoom=dem_info.get("source_max_zoom"),
+            dem_zoom=dem_info.get("dem_zoom"),
+            requested_zoom=dem_info.get("requested_zoom"),
         )
         _set(job_id, status="done", phase="Done", pct=100, result=resp.model_dump())
     except Exception as e:

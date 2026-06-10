@@ -29,6 +29,16 @@ function displayPct(phase: string, pct: number): number {
   return m[phase] ?? 10;
 }
 
+// When the requested zoom exceeds Mapterhorn's deepest zoom here, the multiplier is
+// capped (we never upsample past the source). Tell the user the ceiling.
+function resolutionNote(res: ComputeResponse, screenZoom: number, reqMult: number): string | null {
+  const smz = res.source_max_zoom, rz = res.requested_zoom, dz = res.dem_zoom;
+  if (smz == null || rz == null || rz <= smz) return null;
+  const headroom = Math.max(0, smz - Math.round(screenZoom));
+  const maxMult = headroom >= 2 ? 4 : headroom >= 1 ? 2 : 1;
+  return `Mapterhorn's deepest zoom here is z${smz}, so ${reqMult}× was capped to ${maxMult}× (fetched z${dz}). Zoom the map out to oversample further.`;
+}
+
 export default function App() {
   const [view, setView] = useMapView();
   const [opts, setOpts] = useRemOptions();
@@ -50,11 +60,33 @@ export default function App() {
   type Bounds = { min: number; max: number; log: boolean };
   const [remBounds, setRemBounds] = useState<Bounds | null>(null);
   const [demBounds, setDemBounds] = useState<Bounds | null>(null);
+  const [fitSignal, setFitSignal] = useState(0); // bumps only on run load / compute complete
+  const [resNote, setResNote] = useState<string | null>(null); // resolution-cap note from last build
 
   const bboxRef = useRef<{ bbox: BBox; zoom: number } | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const onBounds = useCallback((bbox: BBox, zoom: number) => { bboxRef.current = { bbox, zoom }; }, []);
   const onMapReady = useCallback((m: MlMap) => { mapRef.current = m; }, []);
+
+  // Grab a small JPEG of the current map for the runs gallery. Waits for the COG
+  // to finish rendering (map "idle") before drawing the canvas down to 360px wide.
+  const captureThumb = useCallback((runId: string) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const draw = () => {
+      try {
+        const src = map.getCanvas();
+        const w = 360, h = Math.max(1, Math.round((w * src.height) / src.width));
+        const off = document.createElement("canvas");
+        off.width = w; off.height = h;
+        const ctx = off.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(src, 0, 0, w, h);
+        setRuns(updateRun(runId, { thumb: off.toDataURL("image/jpeg", 0.55) }));
+      } catch { /* ignore (e.g. tainted canvas) */ }
+    };
+    setTimeout(() => { map.once("idle", draw); map.triggerRepaint(); }, 600);
+  }, []);
 
   // Load saved runs + rehydrate a shared COG from the URL (once).
   useEffect(() => {
@@ -162,11 +194,12 @@ export default function App() {
       ramp: opts.ramp, reverse: opts.reverse, name,
       cl: res.centerline_url ?? null, ts: Date.now(),
     }));
+    return id;
   }, [opts.ramp, opts.reverse, setActiveRem]);
 
   const onCompute = useCallback(async () => {
     if (!bboxRef.current) return;
-    setBusy(true); setRemVisible(true); setPhase("Finding river"); setPct(8);
+    setBusy(true); setRemVisible(true); setResNote(null); setPhase("Finding river"); setPct(8);
     try {
       let cl = centerline;
       if (opts.mode !== "shapefile" && !cl) {
@@ -190,10 +223,13 @@ export default function App() {
       setRemBounds(remB); setDemBounds(demB);
       setResult(res); setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
       if (!cl && res.centerline_url) { const g = await api.centerline(res.centerline_url); if (g) setCenterline(g); }
-      await recordRun(res, remB, demB);
+      setResNote(resolutionNote(res, bboxRef.current.zoom, opts.res));
+      const id = await recordRun(res, remB, demB);
+      setFitSignal((n) => n + 1);
+      captureThumb(id);
     } catch (e) { alert(`Compute failed: ${(e as Error).message}`); }
     finally { setBusy(false); setPhase(""); setPct(0); }
-  }, [opts.res, opts.mode, opts.osm, centerline, uploadId, setOpts, recordRun]);
+  }, [opts.res, opts.mode, opts.osm, centerline, uploadId, setOpts, recordRun, captureThumb]);
 
   const onLoadCog = useCallback(async (url: string) => {
     setBusy(true); setRemVisible(true); setPhase("Reprojecting COG"); setPct(40);
@@ -206,10 +242,12 @@ export default function App() {
       const remB: Bounds = { min: -1, max: Math.ceil(r.rem_max), log: true };
       setRemBounds(remB); setDemBounds(null); setCenterline(null);
       setResult(res); setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
-      await recordRun(res, remB, null);
+      const id = await recordRun(res, remB, null);
+      setFitSignal((n) => n + 1);
+      captureThumb(id);
     } catch (e) { alert(`Could not load COG: ${(e as Error).message}`); }
     finally { setBusy(false); setPhase(""); setPct(0); }
-  }, [setOpts, recordRun]);
+  }, [setOpts, recordRun, captureThumb]);
 
   const onLoadRun = useCallback((r: Run) => {
     const remB: Bounds = { min: r.min, max: r.max, log: r.log ?? true };
@@ -221,7 +259,10 @@ export default function App() {
     setRemBounds(remB); setDemBounds(demB);
     setOpts({ ramp: r.ramp as any, reverse: !!r.reverse, min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
     if (r.cl) api.centerline(r.cl).then(setCenterline); else setCenterline(null);
-  }, [setActiveRem, setOpts]);
+    setResNote(null);
+    setFitSignal((n) => n + 1);
+    if (!r.thumb) captureThumb(r.id);
+  }, [setActiveRem, setOpts, captureThumb]);
 
   // Switch streamed layer (REM vs DEM) and apply that layer's stored bounds (incl. log).
   const onSetLayer = useCallback((l: "rem" | "dem") => {
@@ -302,6 +343,7 @@ export default function App() {
         opts={opts}
         cogUrl={result ? (layer === "dem" ? result.dem_url || result.cog_url : result.cog_url) : null}
         cogBounds={result?.bounds ?? null}
+        fitSignal={fitSignal}
         preview={centerline}
         remVisible={remVisible}
         pickMode={pickMode}
@@ -318,6 +360,7 @@ export default function App() {
           busy={busy}
           phase={phase}
           pct={pct}
+          resNote={resNote}
           result={result}
           layer={layer}
           hasDem={!!result?.dem_url}
