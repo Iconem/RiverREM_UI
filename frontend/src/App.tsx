@@ -21,11 +21,11 @@ function downloadUrl(url: string, name: string) {
 // Map backend phase + RiverREM % to a smooth 0–100 (fake ~20%/step, real % in interp).
 function displayPct(phase: string, pct: number): number {
   const m: Record<string, number> = {
-    Queued: 5, "Fetching terrain tiles": 15, "Resolving centerline": 30,
-    "Running RiverREM": 40, "Finding centerline": 42, "Sampling river elevation": 50,
-    "Detrending DEM": 92, "Building COG": 96, Done: 100,
+    Queued: 5, "Fetching terrain tiles": 5, "Resolving centerline": 10,
+    "Running RiverREM": 15, "Finding centerline": 20, "Sampling river elevation": 25,
+    "Detrending DEM": 90, "Building COG": 95, Done: 100,
   };
-  if (phase === "Interpolating river surface") return Math.round(55 + (pct || 0) * 0.35);
+  if (phase === "Interpolating river surface") return Math.round(30 + (pct || 0) * 0.60);
   return m[phase] ?? 10;
 }
 

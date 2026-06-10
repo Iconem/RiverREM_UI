@@ -10,13 +10,13 @@ style it live in the browser — terrain tiles in, detrended-elevation COG out.
 ## What a River REM is (RiverREM, by OpenTopography)
 
 This app is a web front-end around **RiverREM**, the open-source REM generator from
-**OpenTopography** (Klar & Coe et al.): <https://github.com/OpenTopography/RiverREM>.
+**OpenTopography** (Klar & Coe et al.): see [repo](https://github.com/OpenTopography/RiverREM)
+and blog [post](https://opentopography.org/blog/new-package-automates-river-relative-elevation-model-rem-generation)
 A REM re-references terrain elevation to the local **river water surface**, so the
 floodplain "flattens" and paleochannels, terraces, bars and meander scrolls pop out.
 
 The method originates with **Daniel Coe**, whose IDW technique and the visualizations
-that popularized REMs are documented here —
-**<https://dancoecarto.com/creating-rems-in-qgis-the-idw-method>**. The core idea:
+that popularized REMs are documented [here](https://dancoecarto.com/creating-rems-in-qgis-the-idw-method). The core idea:
 sample the river's water-surface elevation along its centerline, **interpolate it
 across the whole DEM with inverse-distance weighting (IDW)**, then subtract that
 trend surface from the DEM. What's left is height-above-river, where a log-scaled or
@@ -34,6 +34,9 @@ RiverREM's algorithm, in a few bullets (this is what runs on the backend):
 - **Detrend.** `REM = DEM − interpolated_WSE`. The result is metres above the river.
 - (RiverREM can also bake a colour-relief × hillshade image; we deliberately **don't** —
   see "design choices".)
+
+![](https://object.cloud.sdsc.edu/v1/AUTH_opentopography/www/docs/REMBlogPost/detrend_example.png)
+Image source: OpenTopography, Removing the overall downward trend/component in river elevation.
 
 ---
 
