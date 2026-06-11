@@ -17,7 +17,7 @@ export const RAMP_NAMES = [
   "mako_r", "blues_r", "gray", "viridis", "spectral", "topo",
   "inferno", "magma", "plasma", "cividis", "turbo", "terrain", "rdbu_r", "set3",
 ] as const;
-export const BASEMAPS = ["dark", "satellite", "hillshade"] as const;
+export const BASEMAPS = ["dark", "satellite", "hillshade", "none"] as const;
 
 export function useMapView() {
   return useQueryStates({
@@ -43,6 +43,8 @@ export function useRemOptions() {
     oversample: parseAsInteger.withDefault(1), // GPU supersampling factor (× device DPR)
     layer: parseAsStringEnum(["rem", "dem"]).withDefault("rem"), // which COG is streamed
     hillshade: parseAsStringEnum(["off", "dark", "light"]).withDefault("off"), // Mapterhorn relief overlay
+    sliderLo: parseAsFloat, // optional custom slider lower bound (null = auto)
+    sliderHi: parseAsFloat, // optional custom slider upper bound (null = auto)
     osm: parseAsString.withDefault("https://qlever.cs.uni-freiburg.de/api/osm-planet"),
   });
 }
@@ -66,5 +68,6 @@ export function useUiState() {
     foldUtil: parseAsBoolean.withDefault(true), // utilities (basemap/inspect/load) folded
     collapsed: parseAsBoolean.withDefault(false), // whole panel collapsed
     runsView: parseAsStringEnum(["list", "gallery"]).withDefault("list"),
+    theme: parseAsStringEnum(["dark", "light"]).withDefault("dark"),
   });
 }

@@ -10,6 +10,7 @@ enqueue + status-poll, but the work is identical). Endpoints:
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import math
@@ -40,6 +41,8 @@ from .schemas import (
     ComputeResponse,
     PruneRequest,
     PruneResponse,
+    ThumbRequest,
+    ThumbResponse,
 )
 from .terrain import build_dem
 
@@ -217,6 +220,25 @@ def prune_runs(req: PruneRequest):
         if fp.startswith(root) and os.path.exists(fp):
             existing.append(rel)
     return PruneResponse(existing=existing)
+
+
+@app.post("/thumb", response_model=ThumbResponse)
+def save_thumb(req: ThumbRequest):
+    """Persist a run's gallery thumbnail server-side (so it survives browser storage
+    limits and is shareable). Stored under COG_DIR/thumbs/<id>.jpg, served via /cogs."""
+    data = req.image.split(",", 1)[1] if req.image.startswith("data:") else req.image
+    try:
+        raw = base64.b64decode(data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid image data")
+    if len(raw) > 2_000_000:
+        raise HTTPException(status_code=413, detail="thumbnail too large")
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", req.id)[:80] or "thumb"
+    tdir = os.path.join(COG_DIR, "thumbs")
+    os.makedirs(tdir, exist_ok=True)
+    with open(os.path.join(tdir, f"{safe}.jpg"), "wb") as f:
+        f.write(raw)
+    return ThumbResponse(url=f"{PUBLIC_BASE}/cogs/thumbs/{safe}.jpg")
 
 
 @app.post("/upload")

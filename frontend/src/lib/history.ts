@@ -16,6 +16,12 @@ export type Run = {
   demLog?: boolean | null;
   ramp: string;
   reverse?: boolean;
+  transparent?: "none" | "white" | "black" | null;
+  hillshade?: "off" | "dark" | "light" | null;
+  base?: string | null;
+  layer?: "rem" | "dem" | null;       // which layer was being viewed
+  sliderLo?: number | null;           // custom slider bounds (null = auto)
+  sliderHi?: number | null;
   name?: string | null;
   cl?: string | null; // centerline GeoJSON url (backend-hosted, shareable)
   thumb?: string | null; // small JPEG data-URL preview for the gallery
@@ -56,9 +62,9 @@ function persist(all: Run[]): Run[] {
   return cur;
 }
 
-export function addRun(run: Run): Run[] {
-  const all = [run, ...listRuns().filter((r) => r.cog !== run.cog)].slice(0, 40);
-  return persist(all);
+export function addRun(run: Run, dedupeByCog = true): Run[] {
+  const prev = dedupeByCog ? listRuns().filter((r) => r.cog !== run.cog) : listRuns();
+  return persist([run, ...prev].slice(0, 40));
 }
 
 export function removeRun(id: string): Run[] {

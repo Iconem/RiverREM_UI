@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Map as MlMap } from "maplibre-gl";
 import { MapView } from "@/components/MapView";
 import { SidePanel } from "@/components/SidePanel";
-import { useMapView, useRemOptions, useActiveRem } from "@/lib/state";
+import { useMapView, useRemOptions, useActiveRem, useUiState } from "@/lib/state";
 import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit } from "@/lib/api";
 import { fetchLongestRiver, mergeFeatureCollection } from "@/lib/osm";
 import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
@@ -42,6 +42,10 @@ function resolutionNote(res: ComputeResponse, screenZoom: number, reqMult: numbe
 export default function App() {
   const [view, setView] = useMapView();
   const [opts, setOpts] = useRemOptions();
+  const [ui] = useUiState();
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", ui.theme !== "light");
+  }, [ui.theme]);
   const [activeRem, setActiveRem] = useActiveRem();
 
   const [result, setResult] = useState<ComputeResponse | null>(null);
@@ -81,7 +85,12 @@ export default function App() {
       const ctx = off.getContext("2d");
       if (!ctx) return;
       ctx.drawImage(src, 0, 0, w, h);
-      setRuns(updateRun(runId, { thumb: off.toDataURL("image/jpeg", 0.55) }));
+      const dataUrl = off.toDataURL("image/jpeg", 0.6);
+      // Store server-side (survives localStorage limits, shareable). Fall back to
+      // the inline data-URL if the upload fails (e.g. offline dev).
+      api.thumb(runId, dataUrl)
+        .then(({ url }) => setRuns(updateRun(runId, { thumb: url })))
+        .catch(() => setRuns(updateRun(runId, { thumb: dataUrl })));
     } catch { /* ignore (e.g. tainted canvas) */ }
   }, []);
 
@@ -153,12 +162,17 @@ export default function App() {
   // ranges never overwrite each other.
   useEffect(() => {
     if (!activeRunId) return;
+    const sym = {
+      ramp: opts.ramp, reverse: opts.reverse, transparent: opts.transparent,
+      hillshade: opts.hillshade, base: opts.base, layer,
+      sliderLo: opts.sliderLo ?? null, sliderHi: opts.sliderHi ?? null,
+    };
     const patch = layer === "dem"
-      ? { ramp: opts.ramp, reverse: opts.reverse, demMin: opts.min, demMax: opts.max, demLog: opts.log }
-      : { ramp: opts.ramp, reverse: opts.reverse, min: opts.min, max: opts.max, log: opts.log };
+      ? { ...sym, demMin: opts.min, demMax: opts.max, demLog: opts.log }
+      : { ...sym, min: opts.min, max: opts.max, log: opts.log };
     setRuns(updateRun(activeRunId, patch));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opts.ramp, opts.reverse, opts.min, opts.max, opts.log, layer, activeRunId]);
+  }, [opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.sliderLo, opts.sliderHi, opts.min, opts.max, opts.log, layer, activeRunId]);
 
   const onPreview = useCallback(async () => {
     if (!bboxRef.current) return;
@@ -197,11 +211,13 @@ export default function App() {
       id, cog: res.cog_url, dem: res.dem_url, bounds: res.bounds,
       min: remB.min, max: remB.max, log: remB.log,
       demMin: demB?.min ?? null, demMax: demB?.max ?? null, demLog: demB?.log ?? null,
-      ramp: opts.ramp, reverse: opts.reverse, name,
+      ramp: opts.ramp, reverse: opts.reverse, transparent: opts.transparent,
+      hillshade: opts.hillshade, base: opts.base, layer: "rem",
+      sliderLo: opts.sliderLo ?? null, sliderHi: opts.sliderHi ?? null, name,
       cl: res.centerline_url ?? null, ts: Date.now(),
     }));
     return id;
-  }, [opts.ramp, opts.reverse, setActiveRem]);
+  }, [opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.sliderLo, opts.sliderHi, setActiveRem]);
 
   const onCompute = useCallback(async () => {
     if (!bboxRef.current) return;
@@ -263,17 +279,45 @@ export default function App() {
     setActiveRem({ cog: r.cog, dem: r.dem || "", bounds: r.bounds });
     setActiveRunId(r.id); setRemVisible(true);
     setRemBounds(remB); setDemBounds(demB);
-    setOpts({ ramp: r.ramp as any, reverse: !!r.reverse, min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
+    setOpts({
+      ramp: r.ramp as any, reverse: !!r.reverse, transparent: (r.transparent ?? "none") as any,
+      hillshade: (r.hillshade ?? "off") as any, base: (r.base ?? "dark") as any,
+      sliderLo: r.sliderLo ?? null, sliderHi: r.sliderHi ?? null,
+      min: remB.min, max: remB.max, log: remB.log, layer: "rem",
+    });
     if (r.cl) api.centerline(r.cl).then(setCenterline); else setCenterline(null);
     setResNote(null);
     setFitSignal((n) => n + 1);
     if (!r.thumb) captureThumb(r.id);
   }, [setActiveRem, setOpts, captureThumb]);
 
+  // Duplicate the active run: same underlying REM/DEM COGs, but a fresh id and the
+  // current symbology — so an edited ramp can be kept as a separate run.
+  const onSaveSymbology = useCallback(() => {
+    if (!result) return;
+    const id = crypto.randomUUID();
+    const rb = remBounds ?? { min: opts.min, max: opts.max, log: opts.log };
+    const base = runs.find((r) => r.id === activeRunId);
+    setActiveRunId(id);
+    setRuns(addRun({
+      id, cog: result.cog_url, dem: result.dem_url, bounds: result.bounds,
+      min: rb.min, max: rb.max, log: rb.log,
+      demMin: demBounds?.min ?? null, demMax: demBounds?.max ?? null, demLog: demBounds?.log ?? null,
+      ramp: opts.ramp, reverse: opts.reverse, transparent: opts.transparent,
+      hillshade: opts.hillshade, base: opts.base, layer: opts.layer,
+      sliderLo: opts.sliderLo ?? null, sliderHi: opts.sliderHi ?? null,
+      name: base?.name ? `${base.name} (copy)` : null,
+      cl: result.centerline_url ?? base?.cl ?? null, ts: Date.now(),
+    }, false));
+    captureThumb(id);
+  }, [result, remBounds, demBounds, runs, activeRunId, opts.min, opts.max, opts.log, opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.layer, opts.sliderLo, opts.sliderHi, captureThumb]);
+
   // Switch streamed layer (REM vs DEM) and apply that layer's stored bounds (incl. log).
+  // Custom slider overrides are cleared so the new layer falls back to auto bounds.
   const onSetLayer = useCallback((l: "rem" | "dem") => {
     const b = l === "dem" ? demBounds : remBounds;
-    setOpts(b ? { layer: l, min: b.min, max: b.max, log: b.log } : { layer: l });
+    setOpts(b ? { layer: l, min: b.min, max: b.max, log: b.log, sliderLo: null, sliderHi: null }
+              : { layer: l, sliderLo: null, sliderHi: null });
   }, [demBounds, remBounds, setOpts]);
 
   // Persist slider/min/max/log edits into the active layer's bounds.
@@ -350,6 +394,7 @@ export default function App() {
         cogUrl={result ? (layer === "dem" ? result.dem_url || result.cog_url : result.cog_url) : null}
         cogBounds={result?.bounds ?? null}
         fitSignal={fitSignal}
+        theme={ui.theme}
         preview={centerline}
         remVisible={remVisible}
         pickMode={pickMode}
@@ -393,6 +438,7 @@ export default function App() {
           onDeleteRun={onDeleteRun}
           onRenameRun={onRenameRun}
           onRecaptureThumb={onRecaptureThumb}
+          onSaveSymbology={onSaveSymbology}
           onToggleLayer={() => setRemVisible((v) => !v)}
           onTogglePick={() => setPickMode((v) => !v)}
           onGeocode={onGeocode}

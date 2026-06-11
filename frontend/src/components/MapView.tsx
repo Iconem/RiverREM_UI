@@ -71,7 +71,7 @@ const BASE_LAYERS: Record<string, string[]> = {
 type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number; hillshade: string; transparent: "none" | "white" | "black" };
 
 export function MapView({
-  initialView, opts, cogUrl, cogBounds, fitSignal, preview, remVisible, pickMode,
+  initialView, opts, cogUrl, cogBounds, fitSignal, theme, preview, remVisible, pickMode,
   onBounds, onView, onDrawn, onMapReady, onPick,
 }: {
   initialView: { lng: number; lat: number; zoom: number };
@@ -79,6 +79,7 @@ export function MapView({
   cogUrl: string | null;
   cogBounds: [number, number, number, number] | null;
   fitSignal: number;
+  theme: "dark" | "light";
   preview: GeoJSON.GeoJSON | null;
   remVisible: boolean;
   pickMode: boolean;
@@ -176,7 +177,7 @@ export function MapView({
     const id = remRef.current?.layer;
     if (!map || !ready || !id || !map.getLayer(id)) return;
     map.setPaintProperty(id, "color-relief-color", colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse, opts.transparent) as any);
-  }, [opts.ramp, opts.reverse, opts.min, opts.max, opts.transparent, ready]);
+  }, [opts.ramp, opts.reverse, opts.min, opts.max, opts.transparent, cogUrl, ready]);
 
   // Layer show/hide (eye toggle).
   useEffect(() => {
@@ -194,6 +195,13 @@ export function MapView({
       for (const id of ids)
         if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", base === opts.base ? "visible" : "none");
   }, [opts.base, ready]);
+
+  // Background colour follows the UI theme (visible when basemap = none).
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready || !map.getLayer("bg")) return;
+    map.setPaintProperty("bg", "background-color", theme === "light" ? "#f5f5f5" : "#0a0a0a");
+  }, [theme, ready]);
 
   // Oversampling: render the GL canvas at (factor × device DPR), capped, to
   // supersample away blockiness on hi-res / 4K displays. This is the practical

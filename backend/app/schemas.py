@@ -65,6 +65,15 @@ class PruneResponse(BaseModel):
     existing: list[str] = []  # subset of `paths` whose COG still exists on disk
 
 
+class ThumbRequest(BaseModel):
+    id: str
+    image: str  # data-URL or bare base64 JPEG
+
+
+class ThumbResponse(BaseModel):
+    url: str
+
+
 class CenterlineResponse(BaseModel):
     """Preview of the OSM-derived centerline so the UI can show it before computing."""
     geojson: dict

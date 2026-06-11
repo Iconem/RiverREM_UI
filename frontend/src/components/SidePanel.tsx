@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Upload, Pencil, Waves, Play, Loader2, Download, Share2, Layers, Trash2, FileDown,
   Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, ChevronRight, Crosshair, ExternalLink,
-  List, LayoutGrid, ImageOff, Camera,
+  List, LayoutGrid, ImageOff, Camera, Save, Sun, Moon,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,9 +21,9 @@ import type { ComputeResponse, GeoHit } from "@/lib/api";
 
 type Opts = {
   mode: "osm" | "geojson" | "shapefile";
-  base: "dark" | "satellite" | "hillshade";
+  base: "dark" | "satellite" | "hillshade" | "none";
   ramp: (typeof RAMP_NAMES)[number];
-  reverse: boolean; transparent: "none" | "white" | "black"; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; osm: string;
+  reverse: boolean; transparent: "none" | "white" | "black"; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; sliderLo: number | null; sliderHi: number | null; osm: string;
 };
 
 function Swatch({ ramp, reverse = false, className = "h-3 w-8" }: { ramp: string; reverse?: boolean; className?: string }) {
@@ -76,6 +76,7 @@ export function SidePanel(p: {
   onExportRaw: () => void; onExportDem: () => void; onExportCenterline: () => void;
   onLoadRun: (r: Run) => void; onDeleteRun: (id: string) => void; onRenameRun: (id: string, name: string) => void;
   onRecaptureThumb: (id: string) => void;
+  onSaveSymbology: () => void;
   onToggleLayer: () => void; onTogglePick: () => void;
   onGeocode: (q: string) => void; onFlyTo: (lng: number, lat: number) => void;
 }) {
@@ -95,8 +96,11 @@ export function SidePanel(p: {
   const REM_FLOOR = -10;
   const dataMin = result ? Math.floor(isDem ? result.dem_min ?? result.rem_min : result.rem_min) : 0;
   const dataMax = result ? Math.ceil(isDem ? result.dem_max ?? result.rem_max : result.rem_max) : 10;
-  const linLo = isDem ? Math.min(dataMin, opts.min) : Math.min(REM_FLOOR, opts.min);
-  const linHi = Math.max(dataMax, opts.max, Math.ceil((dataMax - Math.min(0, dataMin)) * 2), 1);
+  const autoLo = isDem ? Math.min(dataMin, opts.min) : Math.min(REM_FLOOR, opts.min);
+  const autoHi = Math.max(dataMax, opts.max, Math.ceil((dataMax - Math.min(0, dataMin)) * 2), 1);
+  // Custom slider bounds (set via the disk buttons) override the auto range.
+  const linLo = opts.sliderLo != null ? Math.min(opts.sliderLo, opts.min) : autoLo;
+  const linHi = opts.sliderHi != null ? Math.max(opts.sliderHi, opts.max) : autoHi;
   // Shifted-log: offset so that linLo maps to log10(1) = 0, preserving negatives.
   // off = 1 - linLo  =>  log10(v + off) is defined for all v >= linLo
   const logOff = 1 - linLo;
@@ -113,11 +117,11 @@ export function SidePanel(p: {
 
   if (ui.collapsed) {
     return (
-      <Card className={`${cardBase} flex items-center justify-between px-4 py-2`}>
+      <Card
+        onClick={() => setUi({ collapsed: false })}
+        className={`${cardBase} flex cursor-pointer items-center justify-between px-4 py-2`}>
         <span className="font-sans text-base font-semibold tracking-tight">River REM</span>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setUi({ collapsed: false })} aria-label="expand">
-          <ChevronDown className="h-4 w-4" />
-        </Button>
+        <ChevronDown className="h-4 w-4 text-muted-foreground" />
       </Card>
     );
   }
@@ -129,9 +133,14 @@ export function SidePanel(p: {
           <div className="font-sans text-base font-semibold tracking-tight">River REM</div>
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">viewport · terrain → detrend → cog</div>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setUi({ collapsed: true })} aria-label="collapse">
-          <ChevronUp className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setUi({ theme: ui.theme === "light" ? "dark" : "light" })} aria-label="toggle theme">
+            {ui.theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          </Button>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setUi({ collapsed: true })} aria-label="collapse">
+            <ChevronUp className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Geocoder */}
@@ -234,40 +243,39 @@ export function SidePanel(p: {
 
       <Separator />
 
-      {/* Colour ramp (foldable; oversample lives here) */}
+      {/* Colour ramp (foldable) */}
       <div className="space-y-3">
-        <FoldHeader label="Colour ramp" folded={ui.foldRamp} onClick={() => setUi({ foldRamp: !ui.foldRamp })} />
+        <div className="flex items-center justify-between">
+          <FoldHeader label="Colour ramp" folded={ui.foldRamp} onClick={() => setUi({ foldRamp: !ui.foldRamp })} />
+          {result && (
+            <button
+              onClick={(e) => { e.stopPropagation(); p.onSaveSymbology(); }}
+              title="Export current symbology as new run"
+              aria-label="Export current symbology as new run"
+              className="ml-2 shrink-0 text-muted-foreground hover:text-foreground">
+              <Save className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
         {!ui.foldRamp && (<>
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
-                <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Label className="cursor-pointer">Transparent</Label>
-                <Tabs value={opts.transparent} onValueChange={(v) => setOpts({ transparent: v as Opts["transparent"] })}>
-                  <TabsList className="w-auto">
-                    <TabsTrigger value="none" className="px-2">None</TabsTrigger>
-                    <TabsTrigger value="white" className="px-2">White</TabsTrigger>
-                    <TabsTrigger value="black" className="px-2">Black</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </div>
+            <div className="flex items-center justify-end gap-2">
+              <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
+              <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
             </div>
             <Select value={opts.ramp} onValueChange={(v) => setOpts({ ramp: v as Opts["ramp"] })}>
               <SelectTrigger>
                 <span className="flex w-full items-center gap-2">
-                  <Swatch ramp={opts.ramp} reverse={opts.reverse} className="h-3.5 flex-[3]" />
-                  <span className="flex-1 truncate text-right text-xs text-muted-foreground">{opts.ramp}</span>
+                  <Swatch ramp={opts.ramp} reverse={opts.reverse} className="h-4 flex-[3]" />
+                  <span className="flex-1 truncate text-right text-sm text-muted-foreground">{opts.ramp}</span>
                 </span>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="min-w-[var(--radix-select-trigger-width)]">
                 {RAMP_NAMES.map((n) => (
-                  <SelectItem key={n} value={n}>
+                  <SelectItem key={n} value={n} className="py-2">
                     <span className="flex w-full items-center gap-2">
-                      <Swatch ramp={n} reverse={opts.reverse} className="h-3.5 flex-[3]" />
-                      <span className="flex-1 truncate text-right text-xs">{n}</span>
+                      <Swatch ramp={n} reverse={opts.reverse} className="h-4 flex-[3]" />
+                      <span className="flex-1 truncate text-right text-sm">{n}</span>
                     </span>
                   </SelectItem>
                 ))}
@@ -276,10 +284,22 @@ export function SidePanel(p: {
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1"><Label>Min (m)</Label>
-              <Input type="number" step="0.1" value={opts.min} onChange={(e) => setOpts({ min: Math.max(isDem ? -Infinity : REM_FLOOR, Math.min(parseFloat(e.target.value), opts.max - 0.1)) })} /></div>
-            <div className="space-y-1"><Label>Max (m)</Label>
-              <Input type="number" step="0.1" value={opts.max} onChange={(e) => setOpts({ max: Math.max(parseFloat(e.target.value), opts.min + 0.1) })} /></div>
+            <div className="space-y-1">
+              <Label>Min (m)</Label>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setOpts({ sliderLo: opts.min })} title="Set slider min bound to this value"
+                  aria-label="set slider min bound" className="shrink-0 text-muted-foreground hover:text-foreground"><Save className="h-3.5 w-3.5" /></button>
+                <Input type="number" step="0.1" value={opts.min} onChange={(e) => setOpts({ min: Math.max(isDem ? -Infinity : REM_FLOOR, Math.min(parseFloat(e.target.value), opts.max - 0.1)) })} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Max (m)</Label>
+              <div className="flex items-center gap-1">
+                <Input type="number" step="0.1" value={opts.max} onChange={(e) => setOpts({ max: Math.max(parseFloat(e.target.value), opts.min + 0.1) })} />
+                <button onClick={() => setOpts({ sliderHi: opts.max })} title="Set slider max bound to this value"
+                  aria-label="set slider max bound" className="shrink-0 text-muted-foreground hover:text-foreground"><Save className="h-3.5 w-3.5" /></button>
+              </div>
+            </div>
           </div>
 
           <Slider
@@ -292,9 +312,21 @@ export function SidePanel(p: {
               setOpts({ min: mn, max: mx });
             }}
           />
-          <div className="flex items-center justify-end gap-2">
-            <span className="font-mono text-[10px] text-muted-foreground">log</span>
-            <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-[10px] text-muted-foreground">transparent</span>
+              <Tabs value={opts.transparent} onValueChange={(v) => setOpts({ transparent: v as Opts["transparent"] })}>
+                <TabsList className="w-auto">
+                  <TabsTrigger value="none" className="px-1.5">None</TabsTrigger>
+                  <TabsTrigger value="white" className="px-1.5">White</TabsTrigger>
+                  <TabsTrigger value="black" className="px-1.5">Black</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] text-muted-foreground">log</span>
+              <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
+            </div>
           </div>
         </>)}
       </div>
@@ -346,6 +378,7 @@ export function SidePanel(p: {
                   <SelectItem value="dark">Dark (OSM)</SelectItem>
                   <SelectItem value="satellite">Satellite (Esri)</SelectItem>
                   <SelectItem value="hillshade">Hillshade (Mapterhorn)</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -508,6 +541,11 @@ export function SidePanel(p: {
           <a className="underline" href="https://x.com/jo_chemla" target="_blank" rel="noreferrer">jo-chemla</a>
           {" · "}
           <a className="underline" href="https://iconem.com" target="_blank" rel="noreferrer">Iconem</a>
+        </p>
+        <p>
+          <a className="underline" href="/rem-pure-frontend.html" target="_blank" rel="noreferrer">
+            WIP — experimental pure-frontend / client-side JS River REM (MapLibre)
+          </a>
         </p>
       </div>
     </Card>

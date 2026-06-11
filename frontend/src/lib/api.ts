@@ -95,6 +95,9 @@ export const api = {
   // on the backend (so the client can drop runs whose COGs vanished on rebuild).
   prune: (paths: string[]) => post<{ existing: string[] }>("/runs/prune", { paths }),
 
+  // Persist a gallery thumbnail server-side; returns the hosted URL.
+  thumb: (id: string, image: string) => post<{ url: string }>("/thumb", { id, image }),
+
   // Fetch a run's saved centerline GeoJSON (returns null if none).
   centerline: async (url: string): Promise<GeoJSON.GeoJSON | null> => {
     try {
