@@ -33,7 +33,10 @@ function displayPct(phase: string, pct: number): number {
 // capped (we never upsample past the source). Tell the user the ceiling.
 function resolutionNote(res: ComputeResponse, screenZoom: number, reqMult: number): string | null {
   const smz = res.source_max_zoom, rz = res.requested_zoom, dz = res.dem_zoom;
-  if (smz == null || rz == null || rz <= smz) return null;
+  if (smz == null || rz == null || dz == null) return null;
+  // Only relevant when the user asked to oversample (>1×) AND the multiplier was
+  // actually clamped below what they requested. A 1× request is never "capped".
+  if (reqMult <= 1 || dz >= rz) return null;
   const headroom = Math.max(0, smz - Math.round(screenZoom));
   const maxMult = headroom >= 2 ? 4 : headroom >= 1 ? 2 : 1;
   return `Mapterhorn's deepest zoom here is z${smz}, so ${reqMult}× was capped to ${maxMult}× (fetched z${dz}). Zoom the map out to oversample further.`;
@@ -173,6 +176,17 @@ export default function App() {
     setRuns(updateRun(activeRunId, patch));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.sliderLo, opts.sliderHi, opts.min, opts.max, opts.log, layer, activeRunId]);
+
+  // Keep the active run's thumbnail in sync with its current styling (debounced,
+  // and only once the map is idle). Manual camera capture still works on top.
+  const thumbTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (!activeRunId || busy) return;
+    if (thumbTimer.current) window.clearTimeout(thumbTimer.current);
+    thumbTimer.current = window.setTimeout(() => captureThumb(activeRunId), 1500);
+    return () => { if (thumbTimer.current) window.clearTimeout(thumbTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.min, opts.max, opts.log, opts.layer, activeRunId, busy]);
 
   const onPreview = useCallback(async () => {
     if (!bboxRef.current) return;

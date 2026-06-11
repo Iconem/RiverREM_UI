@@ -52,8 +52,38 @@ DATA_DIR = os.environ.get("DATA_DIR", "./data")
 COG_DIR = os.path.join(DATA_DIR, "cogs")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 PUBLIC_BASE = os.environ.get("PUBLIC_BASE", "http://localhost:8000")
+# Cap the number of stored COG job dirs; oldest are evicted past this. The client
+# prunes runs whose COG vanished (see /runs/prune), so the UI stays consistent.
+MAX_COGS = int(os.environ.get("MAX_COGS", "200"))
 for d in (COG_DIR, UPLOAD_DIR):
     os.makedirs(d, exist_ok=True)
+
+
+def _evict_old_cogs():
+    """Keep at most MAX_COGS job dirs under COG_DIR (newest by mtime), so disk use
+    stays bounded. `thumbs/` and any non-job entries are left untouched."""
+    try:
+        entries = []
+        for name in os.listdir(COG_DIR):
+            if name == "thumbs":
+                continue
+            p = os.path.join(COG_DIR, name)
+            if os.path.isdir(p):
+                entries.append((os.path.getmtime(p), p, name))
+        if len(entries) <= MAX_COGS:
+            return
+        entries.sort(reverse=True)  # newest first
+        for _, p, name in entries[MAX_COGS:]:
+            shutil.rmtree(p, ignore_errors=True)
+            # drop the matching thumbnail too (best-effort)
+            tp = os.path.join(COG_DIR, "thumbs", f"{name}.jpg")
+            if os.path.exists(tp):
+                try:
+                    os.remove(tp)
+                except OSError:
+                    pass
+    except Exception:
+        pass
 
 app = FastAPI(title="RiverREM Pipeline")
 app.add_middleware(
@@ -191,6 +221,7 @@ def _run_compute(job_id: str, req: ComputeRequest):
             requested_zoom=dem_info.get("requested_zoom"),
         )
         _set(job_id, status="done", phase="Done", pct=100, result=resp.model_dump())
+        _evict_old_cogs()
     except Exception as e:
         _set(job_id, status="error", error=str(e))
     finally:

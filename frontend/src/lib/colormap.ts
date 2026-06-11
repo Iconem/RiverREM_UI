@@ -69,8 +69,14 @@ export function colorReliefExpr(name: string, min: number, max: number, reverse 
   // Per-stop alpha: optionally fade out the white (or black) end so an RGB
   // satellite basemap shows through the lightest/darkest relief.
   const alphaOf = (r: number, g: number, b: number): number => {
-    if (transparent === "white") return Math.round(255 * (1 - Math.min(r, g, b) / 255)); // white → 0
-    if (transparent === "black") return Math.round(255 * (Math.max(r, g, b) / 255));     // black → 0
+    // Only the extreme end fades: full opacity until the colour is close to
+    // white/black, then a quick ramp to transparent over the last ~30%.
+    const ramp = (closeness: number) => {
+      const t = Math.max(0, (closeness - 0.9) / 0.1); // 0 below 0.9, →1 at 1.0
+      return Math.round(255 * (1 - t));
+    };
+    if (transparent === "white") return ramp(Math.min(r, g, b) / 255); // whiteness
+    if (transparent === "black") return ramp(1 - Math.max(r, g, b) / 255); // blackness
     return 255;
   };
   const css = (r: number, g: number, b: number) => `rgba(${r},${g},${b},${(alphaOf(r, g, b) / 255).toFixed(3)})`;

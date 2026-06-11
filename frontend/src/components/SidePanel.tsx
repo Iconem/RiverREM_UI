@@ -266,16 +266,16 @@ export function SidePanel(p: {
             <Select value={opts.ramp} onValueChange={(v) => setOpts({ ramp: v as Opts["ramp"] })}>
               <SelectTrigger>
                 <span className="flex w-full items-center gap-2">
-                  <Swatch ramp={opts.ramp} reverse={opts.reverse} className="h-4 flex-[3]" />
-                  <span className="flex-1 truncate text-right text-sm text-muted-foreground">{opts.ramp}</span>
+                  <Swatch ramp={opts.ramp} reverse={opts.reverse} className="h-4 w-52" />
+                  <span className="flex-1 truncate text-right text-xs text-muted-foreground">{opts.ramp}</span>
                 </span>
               </SelectTrigger>
-              <SelectContent className="min-w-[var(--radix-select-trigger-width)]">
+              <SelectContent className="w-[var(--radix-select-trigger-width)]">
                 {RAMP_NAMES.map((n) => (
                   <SelectItem key={n} value={n} className="py-2">
                     <span className="flex w-full items-center gap-2">
-                      <Swatch ramp={n} reverse={opts.reverse} className="h-4 flex-[3]" />
-                      <span className="flex-1 truncate text-right text-sm">{n}</span>
+                      <Swatch ramp={n} reverse={opts.reverse} className="h-4 w-52" />
+                      <span className="flex-1 truncate text-right text-xs">{n}</span>
                     </span>
                   </SelectItem>
                 ))}

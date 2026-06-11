@@ -45,7 +45,7 @@ export function useRemOptions() {
     hillshade: parseAsStringEnum(["off", "dark", "light"]).withDefault("off"), // Mapterhorn relief overlay
     sliderLo: parseAsFloat, // optional custom slider lower bound (null = auto)
     sliderHi: parseAsFloat, // optional custom slider upper bound (null = auto)
-    osm: parseAsString.withDefault("https://qlever.cs.uni-freiburg.de/api/osm-planet"),
+    osm: parseAsString.withDefault("https://qlever.dev/api/osm-planet"),
   });
 }
 

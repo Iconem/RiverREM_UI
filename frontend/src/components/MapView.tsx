@@ -200,7 +200,7 @@ export function MapView({
   useEffect(() => {
     const map = mapRef.current?.getMap();
     if (!map || !ready || !map.getLayer("bg")) return;
-    map.setPaintProperty("bg", "background-color", theme === "light" ? "#f5f5f5" : "#0a0a0a");
+    map.setPaintProperty("bg", "background-color", theme === "light" ? "#ffffff" : "#0a0a0a");
   }, [theme, ready]);
 
   // Oversampling: render the GL canvas at (factor × device DPR), capped, to

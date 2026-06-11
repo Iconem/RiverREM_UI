@@ -19,7 +19,7 @@ const OVERPASS_ENDPOINTS = [
 /** Selectable presets for the UI. QLever speaks SPARQL, not Overpass QL, so it is
  *  marked experimental — if it fails the fallback chain takes over. */
 export const OVERPASS_PRESETS: { label: string; url: string }[] = [
-  { label: "qlever (fast)", url: "https://qlever.cs.uni-freiburg.de/api/osm-planet" },
+  { label: "qlever (fast)", url: "https://qlever.dev/api/osm-planet" },
   { label: "overpass.de", url: "https://overpass-api.de/api/interpreter" },
   { label: "kumi.systems", url: "https://overpass.kumi.systems/api/interpreter" },
   { label: "private.coffee", url: "https://overpass.private.coffee/api/interpreter" },
@@ -171,14 +171,23 @@ async function fetchQlever(bbox: BBox, endpoint: string): Promise<NamedLine[]> {
     `${bbox.east} ${bbox.north},${bbox.west} ${bbox.north},${bbox.west} ${bbox.south}))`;
   const sparql = `
 PREFIX geo: <http://www.opengis.net/ont/geosparql#>
-PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
 PREFIX osmkey: <https://www.openstreetmap.org/wiki/Key:>
+PREFIX spatialSearch: <https://qlever.cs.uni-freiburg.de/spatialSearch/>
 SELECT ?name ?wkt WHERE {
-  ?osm osmkey:waterway ?ww .
-  ?osm osmkey:name ?name .
-  ?osm geo:hasGeometry/geo:asWKT ?wkt .
-  FILTER(?ww = "river" || ?ww = "stream" || ?ww = "tidal_channel")
-  FILTER(geof:sfIntersects(?wkt, "${poly}"^^geo:wktLiteral))
+  BIND("${poly}"^^geo:wktLiteral AS ?area)
+  SERVICE spatialSearch: {
+    _:config spatialSearch:algorithm spatialSearch:libspatialjoin ;
+             spatialSearch:joinType spatialSearch:intersects ;
+             spatialSearch:left ?area ;
+             spatialSearch:right ?wkt ;
+             spatialSearch:payload ?name .
+    {
+      ?osm osmkey:waterway ?ww .
+      ?osm osmkey:name ?name .
+      ?osm geo:hasGeometry/geo:asWKT ?wkt .
+      FILTER(?ww = "river" || ?ww = "stream" || ?ww = "tidal_channel")
+    }
+  }
 } LIMIT 5000`;
   // Use a "simple" CORS request (form-encoded body + only safelisted headers) so the
   // browser skips the OPTIONS preflight — qlever's endpoint 308-redirects preflights,
