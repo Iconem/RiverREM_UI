@@ -3,271 +3,217 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>REM · IDW · Live Pipeline</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js"></script>
+<title>REM · IDW Pipeline</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css"/>
+<script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 <style>
   :root {
-    --bg: #0d0f14;
-    --panel: #13161d;
-    --border: #232733;
-    --accent: #4fc3a1;
-    --accent2: #7b68ee;
-    --warn: #f4a460;
-    --text: #e2e6f0;
-    --muted: #6b7280;
-    --danger: #e05c5c;
-    --font-mono: 'JetBrains Mono', 'Fira Mono', monospace;
-    --font-ui: 'Inter', system-ui, sans-serif;
+    --bg:#09090b; --panel:#09090b; --surface:#18181b; --border:#27272a; --border2:#3f3f46;
+    --text:#fafafa; --muted-fg:#a1a1aa; --subtle:#71717a;
+    --accent:#ffffff; --accent-fg:#09090b;
+    --danger:#f87171; --warn:#fbbf24; --success:#4ade80;
+    --ring:rgba(255,255,255,.18);
+    --font-ui:'Inter',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono','Fira Mono',monospace;
+    --r:6px;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-ui); overflow: hidden; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font-ui);overflow:hidden;font-size:14px}
+  #app{display:flex;flex-direction:column;height:100vh}
+  #main{display:flex;flex:1;min-height:0}
 
-  #app { display: flex; flex-direction: column; height: 100vh; }
+  /* Header */
+  #header{height:48px;flex-shrink:0;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--border);background:var(--panel)}
+  #header h1{font-size:13px;font-weight:600;letter-spacing:.05em;color:var(--text)}
+  #header .sep{color:var(--border2)}
+  #header .sub{font-size:12px;color:var(--muted-fg)}
 
-  /* ── Header ── */
-  #header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 0 16px; height: 48px;
-    background: var(--panel); border-bottom: 1px solid var(--border);
-    flex-shrink: 0; z-index: 10;
+  /* Sidebar */
+  #sidebar{width:288px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+  #sidebar-scroll{flex:1;overflow-y:auto}
+  .section{padding:12px 14px;border-bottom:1px solid var(--border)}
+  .section-title{font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:9px}
+
+  /* Form */
+  .field{margin-bottom:7px}.field:last-child{margin-bottom:0}
+  .field>label{display:block;font-size:12px;color:var(--muted-fg);margin-bottom:3px}
+  input[type=number],input[type=text],select{
+    width:100%;background:var(--surface);border:1px solid var(--border);
+    color:var(--text);font-family:var(--font-mono);font-size:12px;
+    padding:5px 8px;border-radius:var(--r);outline:none;
+    transition:border-color .15s,box-shadow .15s;-webkit-appearance:none
   }
-  #header h1 { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
-  #header span.sep { color: var(--border); font-size: 18px; }
-  #header span.sub { font-size: 12px; color: var(--muted); }
-
-  /* ── Main layout ── */
-  #main { display: flex; flex: 1; min-height: 0; }
-
-  /* ── Sidebar ── */
-  #sidebar {
-    width: 296px; flex-shrink: 0;
-    background: var(--panel); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; overflow: hidden;
-  }
-  .section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
-  .section-title {
-    font-size: 10px; font-weight: 700; letter-spacing: .12em;
-    text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
-  }
-
-  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
-  input[type=number], input[type=text], select {
-    width: 100%; background: var(--bg); border: 1px solid var(--border);
-    color: var(--text); font-family: var(--font-mono); font-size: 12px;
-    padding: 6px 8px; border-radius: 4px; outline: none;
-    transition: border-color .15s;
-  }
-  select { cursor: pointer; }
-  input:focus, select:focus { border-color: var(--accent); }
-
-  /* Params */
-  .param-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-  .param-row:last-child { margin-bottom: 0; }
-  .param-row label { margin: 0; }
-  .param-row input[type=number] { width: 80px; }
-  .param-row select { width: 120px; }
+  input[type=number]:disabled{opacity:.32;cursor:not-allowed}
+  select{cursor:pointer}
+  input:focus,select:focus{border-color:var(--border2);box-shadow:0 0 0 3px var(--ring)}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}
+  .row:last-child{margin-bottom:0}
+  .row>.rlbl{font-size:12px;color:var(--muted-fg);white-space:nowrap}
+  .row>input[type=number]{width:72px}
+  .row>select{width:130px}
+  .zoom-right{display:flex;align-items:center;gap:6px}
+  .zoom-right>input[type=number]{width:60px}
+  .chk{display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:var(--muted-fg);white-space:nowrap;user-select:none}
+  .chk input[type=checkbox]{display:none}
+  .chk-box{width:14px;height:14px;border-radius:3px;border:1px solid var(--border2);background:var(--surface);flex-shrink:0;position:relative;transition:background .15s,border-color .15s}
+  .chk input:checked+.chk-box{background:var(--accent);border-color:var(--accent)}
+  .chk input:checked+.chk-box::after{content:'';position:absolute;left:3px;top:1px;width:4px;height:7px;border:2px solid var(--accent-fg);border-top:none;border-left:none;transform:rotate(45deg)}
 
   /* Run button */
-  #btn-run {
-    margin: 12px 14px 0;
-    width: calc(100% - 28px);
-    background: var(--accent); color: #0d0f14;
-    border: none; border-radius: 5px; padding: 9px;
-    font-size: 13px; font-weight: 700; letter-spacing: .04em;
-    cursor: pointer; transition: opacity .15s;
-  }
-  #btn-run:hover { opacity: .85; }
-  #btn-run:disabled { opacity: .4; cursor: not-allowed; }
+  #btn-run{margin:10px 14px 0;width:calc(100% - 28px);background:var(--accent);color:var(--accent-fg);border:none;border-radius:var(--r);padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;letter-spacing:.02em}
+  #btn-run:hover{opacity:.87}#btn-run:disabled{opacity:.32;cursor:not-allowed}
 
-  /* Steps log */
-  #log {
-    flex: 1; overflow-y: auto;
-    padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;
-  }
-  .log-entry {
-    font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
-    display: flex; gap: 8px; align-items: flex-start;
-  }
-  .log-entry .icon { flex-shrink: 0; width: 14px; }
-  .log-entry.pending .icon { color: var(--muted); }
-  .log-entry.running .icon { color: var(--warn); }
-  .log-entry.done .icon { color: var(--accent); }
-  .log-entry.error .icon { color: var(--danger); }
-  .log-entry .msg { color: var(--text); word-break: break-word; }
-  .log-entry.error .msg { color: var(--danger); }
-  .log-entry.done .msg { color: var(--muted); }
+  /* GPU toggle badge */
+  .gpu-row{display:flex;align-items:center;gap:6px;margin-top:8px}
+  .gpu-badge{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:3px;border:1px solid var(--border2);color:var(--muted-fg)}
+  .gpu-badge.active{background:rgba(74,222,128,.12);border-color:#4ade80;color:#4ade80}
+  .gpu-badge.fallback{background:rgba(251,191,36,.1);border-color:#fbbf24;color:#fbbf24}
 
-  /* Stats panel */
-  #stats {
-    padding: 10px 14px; border-top: 1px solid var(--border);
-    font-family: var(--font-mono); font-size: 11px; color: var(--muted);
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .stat-row { display: flex; justify-content: space-between; }
-  .stat-val { color: var(--accent2); }
-
-  /* ── Map ── */
-  #map { flex: 1; }
+  /* Layer toggles */
+  .ltogs{display:flex;gap:5px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border)}
+  .ltog{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:var(--r);border:1px solid var(--border2);background:transparent;font-size:11px;font-weight:500;color:var(--muted-fg);cursor:pointer;transition:all .15s;user-select:none}
+  .ltog .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+  .ltog.on{background:var(--text);color:var(--accent-fg);border-color:var(--text)}
 
   /* Geocoder */
-  .maplibregl-ctrl-geocoder {
-    min-width: 260px; background: rgba(13,15,20,.92) !important;
-    border: 1px solid var(--border) !important; border-radius: 5px !important;
-    backdrop-filter: blur(8px); box-shadow: none !important;
-  }
-  .maplibregl-ctrl-geocoder input {
-    background: transparent !important; color: var(--text) !important;
-    font-family: var(--font-ui) !important; font-size: 12px !important;
-    border: none !important; padding: 0 !important;
-  }
-  .maplibregl-ctrl-geocoder input::placeholder { color: var(--muted) !important; }
-  .maplibregl-ctrl-geocoder .suggestions {
-    background: rgba(13,15,20,.96) !important; border: 1px solid var(--border) !important;
-    border-radius: 4px !important; margin-top: 4px;
-  }
-  .maplibregl-ctrl-geocoder .suggestions li a { color: var(--text) !important; font-size: 12px !important; }
-  .maplibregl-ctrl-geocoder .suggestions li.active a,
-  .maplibregl-ctrl-geocoder .suggestions li:hover a { background: rgba(79,195,161,.12) !important; }
+  .geo-wrap{padding:10px 14px;border-bottom:1px solid var(--border)}
+  .geo-inner{display:flex}
+  #geocoder-q{flex:1;background:var(--surface);border:1px solid var(--border);border-right:none;color:var(--text);font-family:var(--font-ui);font-size:12px;padding:5px 9px;border-radius:var(--r) 0 0 var(--r);outline:none;transition:border-color .15s,box-shadow .15s}
+  #geocoder-q::placeholder{color:var(--subtle)}
+  #geocoder-q:focus{border-color:var(--border2);box-shadow:0 0 0 3px var(--ring)}
+  #geocoder-btn{background:var(--surface);border:1px solid var(--border);border-left:none;color:var(--muted-fg);padding:0 10px;cursor:pointer;border-radius:0 var(--r) var(--r) 0;font-size:13px;transition:color .12s}
+  #geocoder-btn:hover{color:var(--text)}
+  #geocoder-results{margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;display:none}
+  .gc-item{padding:6px 10px;font-size:12px;color:var(--text);cursor:pointer;border-bottom:1px solid var(--border);transition:background .1s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gc-item:last-child{border-bottom:none}.gc-item:hover{background:var(--border)}
 
-  /* Layer toggle pills */
-  #layer-toggle {
-    position: absolute; top: 60px; right: 12px; z-index: 5;
-    display: flex; flex-direction: column; gap: 6px;
-  }
-  .pill {
-    background: rgba(13,15,20,.88); border: 1px solid var(--border);
-    border-radius: 20px; padding: 5px 12px;
-    font-size: 11px; font-weight: 600; cursor: pointer;
-    color: var(--muted); transition: all .15s; user-select: none;
-    backdrop-filter: blur(8px);
-  }
-  .pill.active { background: var(--accent); color: #0d0f14; border-color: var(--accent); }
+  /* Log */
+  #log{padding:10px 14px;display:flex;flex-direction:column;gap:3px}
+  .log-entry{font-family:var(--font-mono);font-size:11px;line-height:1.55;display:flex;gap:7px}
+  .log-entry .icon{flex-shrink:0;width:12px;margin-top:1px}
+  .log-entry.pending .icon{color:var(--subtle)}.log-entry.running .icon{color:var(--warn)}
+  .log-entry.done .icon{color:var(--success)}.log-entry.error .icon{color:var(--danger)}
+  .log-entry .msg{color:var(--text);word-break:break-word}
+  .log-entry.done .msg{color:var(--muted-fg)}.log-entry.error .msg{color:var(--danger)}
+
+  /* Stats */
+  #stats{padding:10px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px}
+  .stat-row{display:flex;justify-content:space-between;font-size:11px;font-family:var(--font-mono)}
+  .stat-lbl{color:var(--muted-fg)}.stat-val{color:var(--text);font-weight:500}
+
+  /* Map */
+  #map{flex:1}
 
   /* Legend */
-  #legend {
-    position: absolute; bottom: 30px; right: 12px; z-index: 5;
-    background: rgba(13,15,20,.88); border: 1px solid var(--border);
-    border-radius: 6px; padding: 10px 14px; backdrop-filter: blur(8px); font-size: 11px;
-  }
-  #legend .legend-title { color: var(--muted); margin-bottom: 6px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; font-size: 10px; }
-  #legend-bar { width: 140px; height: 10px; border-radius: 3px; margin-bottom: 4px; }
-  .legend-labels { display: flex; justify-content: space-between; color: var(--muted); }
+  #legend{position:absolute;bottom:28px;right:12px;z-index:5;background:rgba(9,9,11,.9);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;backdrop-filter:blur(8px);font-size:11px}
+  .ltitle{color:var(--muted-fg);margin-bottom:5px;font-size:10px;font-weight:500;letter-spacing:.07em;text-transform:uppercase}
+  #legend-bar{width:130px;height:8px;border-radius:3px;margin-bottom:4px}
+  .legend-labels{display:flex;justify-content:space-between;color:var(--muted-fg);font-family:var(--font-mono);font-size:10px}
 
-  /* Popup */
-  .river-popup { font-size: 12px; background: var(--panel); color: var(--text); border: 1px solid var(--border); padding: 6px 10px; border-radius: 4px; }
+  /* REM section */
+  .rem-section{padding:12px 14px;border-bottom:1px solid var(--border)}
+  .range-header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+  .range-title{font-size:11px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:var(--muted-fg)}
+  .range-vals{font-family:var(--font-mono);font-size:11px;color:var(--text)}
+  .double-slider{position:relative;height:22px;display:flex;align-items:center;margin-bottom:4px}
+  .double-slider input[type=range]{position:absolute;width:100%;pointer-events:none;appearance:none;-webkit-appearance:none;background:transparent;height:4px;outline:none;border:none;padding:0}
+  .double-slider input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);pointer-events:all;cursor:pointer;box-shadow:0 0 0 1px var(--border2);transition:box-shadow .12s}
+  .double-slider input[type=range]::-webkit-slider-thumb:hover{box-shadow:0 0 0 3px var(--ring)}
+  .double-slider input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);pointer-events:all;cursor:pointer}
+  .slider-track{position:absolute;height:4px;border-radius:2px;background:var(--border2);width:100%}
+  .slider-fill{position:absolute;height:4px;border-radius:2px;background:var(--accent);pointer-events:none}
+  .opa-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .opa-lbl{font-size:12px;color:var(--muted-fg);white-space:nowrap;min-width:52px}
+  .opa-row input[type=range]{flex:1;appearance:none;-webkit-appearance:none;background:transparent;height:4px;outline:none;border:none;padding:0}
+  .opa-row input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:var(--border2)}
+  .opa-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);margin-top:-5px;cursor:pointer;box-shadow:0 0 0 1px var(--border2)}
+  .opa-val{font-size:11px;font-family:var(--font-mono);color:var(--muted-fg);min-width:32px;text-align:right}
 
-  /* ── Double range slider ── */
-  .range-section { margin-top: 2px; }
-  .range-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-  .range-header .range-title { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
-  .range-vals { font-family: var(--font-mono); font-size: 11px; color: var(--accent2); }
-  .double-slider {
-    position: relative; height: 22px; display: flex; align-items: center; margin-bottom: 2px;
-  }
-  .double-slider input[type=range] {
-    position: absolute; width: 100%; pointer-events: none;
-    appearance: none; -webkit-appearance: none;
-    background: transparent; height: 4px; outline: none; border: none; padding: 0;
-  }
-  .double-slider input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none;
-    width: 14px; height: 14px; border-radius: 50%;
-    background: var(--accent); border: 2px solid var(--bg);
-    pointer-events: all; cursor: pointer;
-    box-shadow: 0 0 0 1px var(--accent); transition: transform .1s;
-  }
-  .double-slider input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
-  .double-slider input[type=range]::-moz-range-thumb {
-    width: 14px; height: 14px; border-radius: 50%;
-    background: var(--accent); border: 2px solid var(--bg); pointer-events: all; cursor: pointer;
-  }
-  .slider-track { position: absolute; height: 4px; border-radius: 2px; background: var(--border); width: 100%; }
-  .slider-fill { position: absolute; height: 4px; border-radius: 2px; background: var(--accent); pointer-events: none; }
-
-  /* ── Opacity slider ── */
-  .opacity-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-  .opacity-row .opa-label { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
-  .opacity-row input[type=range] {
-    flex: 1; appearance: none; -webkit-appearance: none;
-    background: transparent; height: 4px; outline: none; border: none; padding: 0;
-  }
-  .opacity-row input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--border); }
-  .opacity-row input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 14px; height: 14px;
-    border-radius: 50%; background: var(--accent2);
-    border: 2px solid var(--bg); margin-top: -5px; cursor: pointer;
-    box-shadow: 0 0 0 1px var(--accent2);
-  }
-  .opacity-row .opa-val { font-size: 11px; font-family: var(--font-mono); color: var(--accent2); min-width: 30px; text-align: right; }
-
-  /* scrollbar */
-  ::-webkit-scrollbar { width: 5px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
 </style>
-<!-- MapLibre GL Geocoder (Photon / open data, no key) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl-geocoder/1.2.0/maplibre-gl-geocoder.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl-geocoder/1.2.0/maplibre-gl-geocoder.css"/>
 </head>
 <body>
 <div id="app">
-
-  <!-- Header -->
   <div id="header">
-    <h1>REM · IDW Pipeline</h1>
-    <span class="sep">|</span>
+    <h1>REM · IDW Pipeline</h1><span class="sep">|</span>
     <span class="sub">Mapterhorn DEM → River Sampling → IDW → Relative Elevation Model</span>
   </div>
-
   <div id="main">
-
-    <!-- Sidebar -->
     <div id="sidebar">
+      <div id="sidebar-scroll">
 
-      <!-- IDW Parameters -->
-      <div class="section">
-        <div class="section-title">IDW Parameters</div>
-        <div class="param-row">
-          <label>Power (p)</label>
-          <input type="number" id="p-power" value="2" min="0.5" max="6" step="0.5"/>
+        <!-- Geocoder -->
+        <div class="geo-wrap">
+          <div class="geo-inner">
+            <input id="geocoder-q" type="text" placeholder="Search place…" autocomplete="off"/>
+            <button id="geocoder-btn">⌕</button>
+          </div>
+          <div id="geocoder-results"></div>
         </div>
-        <div class="param-row">
-          <label>Sample points</label>
-          <input type="number" id="p-samples" value="1000" min="50" max="5000" step="50"/>
-        </div>
-        <div class="param-row">
-          <label>Tile zoom (DEM)</label>
-          <input type="number" id="p-zoom" value="11" min="8" max="13" step="1"/>
-        </div>
-        <div class="param-row" style="margin-top:8px; flex-wrap:wrap; gap:4px 0">
-          <label style="width:100%;margin-bottom:3px">Overpass endpoint</label>
-          <select id="overpass-url" style="width:100%">
-            <option value="https://overpass-api.de/api/interpreter">overpass-api.de</option>
-            <option value="https://overpass.private.coffee/api/interpreter">private.coffee</option>
-            <option value="https://overpass.kumi.systems/api/interpreter">kumi.systems</option>
-            <option value="https://maps.mail.ru/osm/tools/overpass/api/interpreter">mail.ru</option>
-          </select>
-        </div>
-      </div>
 
-      <button id="btn-run">▶ Run Pipeline</button>
-
-      <!-- REM Display -->
-      <div class="section" style="border-top:1px solid var(--border)">
-        <div class="section-title">REM Display</div>
-        <!-- Colormap select -->
-        <div class="param-row" style="margin-bottom:10px">
-          <label style="margin:0">Colormap</label>
-          <select id="rem-cmap">
-            <option value="mako">Mako</option>
-            <option value="mako_r">Mako (reversed)</option>
-            <option value="blues">Blues</option>
-            <option value="blues_r">Blues (reversed)</option>
-          </select>
+        <!-- Layer Toggles -->
+        <div class="ltogs">
+          <button class="ltog on"  data-layer="rem-color"><span class="dot"></span>REM</button>
+          <button class="ltog on"  data-layer="hillshade"><span class="dot"></span>Hillshade</button>
+          <button class="ltog on"  data-layer="river"><span class="dot"></span>River</button>
+          <button class="ltog"     data-layer="samples" id="ltog-samples"><span class="dot"></span>Samples</button>
         </div>
-        <!-- Double slider -->
-        <div class="range-section">
+
+        <!-- IDW Parameters -->
+        <div class="section">
+          <div class="section-title">IDW Parameters</div>
+          <div class="row">
+            <span class="rlbl">Power (p)</span>
+            <input type="number" id="p-power" value="2" min="0.5" max="6" step="0.5"/>
+          </div>
+          <div class="row">
+            <span class="rlbl">Sample points</span>
+            <input type="number" id="p-samples" value="100" min="20" max="2000" step="10"/>
+          </div>
+          <div class="row">
+            <span class="rlbl">Tile zoom (DEM)</span>
+            <div class="zoom-right">
+              <input type="number" id="p-zoom" value="11" min="8" max="14" step="1" disabled/>
+              <label class="chk" title="Use viewport zoom + 1">
+                <input type="checkbox" id="zoom-auto" checked/>
+                <span class="chk-box"></span>auto
+              </label>
+            </div>
+          </div>
+          <div class="field" style="margin-top:7px">
+            <label>Overpass endpoint</label>
+            <select id="overpass-url">
+              <option value="https://overpass-api.de/api/interpreter">overpass-api.de</option>
+              <option value="https://overpass.private.coffee/api/interpreter">private.coffee</option>
+              <option value="https://overpass.kumi.systems/api/interpreter">kumi.systems</option>
+              <option value="https://maps.mail.ru/osm/tools/overpass/api/interpreter">mail.ru</option>
+            </select>
+          </div>
+          <!-- IDW backend toggle -->
+          <div class="gpu-row">
+            <label class="chk">
+              <input type="checkbox" id="gpu-toggle" checked/>
+              <span class="chk-box"></span>
+              <span style="font-size:12px;color:var(--muted-fg)">GPU IDW</span>
+            </label>
+            <span class="gpu-badge" id="gpu-badge">—</span>
+          </div>
+        </div>
+
+        <button id="btn-run">▶ Run Pipeline</button>
+
+        <!-- REM Display -->
+        <div class="rem-section">
+          <div class="section-title">REM Display</div>
+          <div class="row" style="margin-bottom:9px">
+            <span class="rlbl">Colormap</span>
+            <select id="rem-cmap">
+              <option value="mako">Mako</option>
+              <option value="mako_r">Mako (rev.)</option>
+              <option value="blues">Blues</option>
+              <option value="blues_r">Blues (rev.)</option>
+            </select>
+          </div>
           <div class="range-header">
             <span class="range-title">Color bounds (m)</span>
             <span class="range-vals"><span id="rem-min-lbl">−5</span> → <span id="rem-max-lbl">+10</span></span>
@@ -278,47 +224,33 @@
             <input type="range" id="rem-min" min="-10" max="20" value="-5" step="0.1"/>
             <input type="range" id="rem-max" min="-10" max="20" value="10" step="0.1"/>
           </div>
+          <div class="opa-row">
+            <span class="opa-lbl">Opacity</span>
+            <input type="range" id="rem-opacity" min="0" max="100" value="80" step="1"/>
+            <span class="opa-val" id="rem-opacity-lbl">80%</span>
+          </div>
         </div>
-        <!-- Opacity -->
-        <div class="opacity-row">
-          <span class="opa-label">Opacity</span>
-          <input type="range" id="rem-opacity" min="0" max="100" value="80" step="1"/>
-          <span class="opa-val" id="rem-opacity-lbl">80%</span>
+
+        <div id="log">
+          <div class="log-entry pending"><span class="icon">○</span><span class="msg">Waiting to start…</span></div>
+        </div>
+        <div id="stats" style="display:none">
+          <div class="stat-row"><span class="stat-lbl">River</span><span class="stat-val" id="s-name">—</span></div>
+          <div class="stat-row"><span class="stat-lbl">Length (km)</span><span class="stat-val" id="s-len">—</span></div>
+          <div class="stat-row"><span class="stat-lbl">Elev range (m)</span><span class="stat-val" id="s-elev">—</span></div>
+          <div class="stat-row"><span class="stat-lbl">REM tiles cached</span><span class="stat-val" id="s-tiles">0</span></div>
         </div>
       </div>
-
-      <div id="log" style="margin-top:10px">
-        <div class="log-entry pending"><span class="icon">○</span><span class="msg">Waiting to start…</span></div>
-      </div>
-
-      <div id="stats" style="display:none">
-        <div class="stat-row"><span>River name</span><span class="stat-val" id="s-name">—</span></div>
-        <div class="stat-row"><span>River length (km)</span><span class="stat-val" id="s-len">—</span></div>
-        <div class="stat-row"><span>Sample points</span><span class="stat-val" id="s-pts">—</span></div>
-        <div class="stat-row"><span>Elev range (m)</span><span class="stat-val" id="s-elev">—</span></div>
-        <div class="stat-row"><span>REM cached tiles</span><span class="stat-val" id="s-tiles">0</span></div>
-      </div>
-
     </div>
 
-    <!-- Map container -->
     <div style="position:relative;flex:1">
       <div id="map" style="height:100%"></div>
-
-      <div id="layer-toggle">
-        <div class="pill active" data-layer="rem-color" id="pill-rem">REM Color</div>
-        <div class="pill active" data-layer="hillshade" id="pill-hill">Hillshade</div>
-        <div class="pill active" data-layer="river" id="pill-river">River</div>
-        <div class="pill active" data-layer="samples" id="pill-samples">Samples</div>
-      </div>
-
       <div id="legend">
-        <div class="legend-title">Relative Elevation</div>
+        <div class="ltitle">Relative Elevation</div>
         <div id="legend-bar"></div>
         <div class="legend-labels"><span id="leg-min">−5 m</span><span>river</span><span id="leg-max">+10 m</span></div>
       </div>
     </div>
-
   </div>
 </div>
 
@@ -326,716 +258,688 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    GLOBALS
 ═══════════════════════════════════════════════════════════════════════════ */
-const MAPTERHORN = 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp';
+const MAPTERHORN    = 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp';
 const getOverpassUrl = () => document.getElementById('overpass-url').value;
 
-let map, riverPoints = [];
+let map, riverPoints = []; // riverPoints: [{mx,my,elev}] — pre-projected to EPSG:3857
 const tileCache = new Map();
 let tileCacheCount = 0;
 let lastBbox = null;
 const imgCache = new Map();
+let gpuCtx = null; // WebGL2 context for GPU IDW (null = use CPU)
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EPSG:3857 PROJECTION  (replaces haversine for IDW distance)
+═══════════════════════════════════════════════════════════════════════════ */
+const R_MERC = 6378137; // WGS84 semi-major axis
+function lonToMx(lon) { return lon * Math.PI / 180 * R_MERC; }
+function latToMy(lat) { return Math.log(Math.tan(Math.PI/4 + lat*Math.PI/360)) * R_MERC; }
+// haversine kept only for segment length (sampling) — not IDW
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371000,φ1=lat1*Math.PI/180,φ2=lat2*Math.PI/180;
+  const Δφ=(lat2-lat1)*Math.PI/180,Δλ=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(Δφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    COLORMAPS
 ═══════════════════════════════════════════════════════════════════════════ */
-const COLORMAPS = {
-  mako: [
-    [0.00, [ 11,  4,  5]],
-    [0.10, [ 30, 12, 45]],
-    [0.22, [ 59, 15,112]],
-    [0.38, [140, 41,129]],
-    [0.55, [222, 73,104]],
-    [0.72, [254,159,109]],
-    [0.87, [253,211,165]],
-    [1.00, [253,231,212]],
-  ],
-  blues: [
-    [0.00, [247,251,255]],
-    [0.15, [222,235,247]],
-    [0.30, [198,219,239]],
-    [0.45, [158,202,225]],
-    [0.60, [107,174,214]],
-    [0.75, [ 66,146,198]],
-    [0.88, [ 33,113,181]],
-    [1.00, [  8, 69,148]],
-  ],
+const COLORMAPS={
+  mako:[[0,[11,4,5]],[.1,[30,12,45]],[.22,[59,15,112]],[.38,[140,41,129]],[.55,[222,73,104]],[.72,[254,159,109]],[.87,[253,211,165]],[1,[253,231,212]]],
+  blues:[[0,[247,251,255]],[.15,[222,235,247]],[.3,[198,219,239]],[.45,[158,202,225]],[.6,[107,174,214]],[.75,[66,146,198]],[.88,[33,113,181]],[1,[8,69,148]]],
 };
-// reversed variants
-COLORMAPS.mako_r = [...COLORMAPS.mako].map(([t,c]) => [1-t,c]).sort((a,b)=>a[0]-b[0]);
-COLORMAPS.blues_r = [...COLORMAPS.blues].map(([t,c]) => [1-t,c]).sort((a,b)=>a[0]-b[0]);
-
-// CSS gradient strings for legend bar
-const CMAP_CSS = {
-  mako:   'linear-gradient(to right,#0b0405,#3b0f70,#8c2981,#de4968,#fe9f6d,#fde724)',
-  mako_r: 'linear-gradient(to right,#fde724,#fe9f6d,#de4968,#8c2981,#3b0f70,#0b0405)',
-  blues:  'linear-gradient(to right,#f7fbff,#c6dbef,#6baed6,#2171b5,#084594)',
+COLORMAPS.mako_r=[...COLORMAPS.mako].map(([t,c])=>[1-t,c]).sort((a,b)=>a[0]-b[0]);
+COLORMAPS.blues_r=[...COLORMAPS.blues].map(([t,c])=>[1-t,c]).sort((a,b)=>a[0]-b[0]);
+const CMAP_CSS={
+  mako:'linear-gradient(to right,#0b0405,#3b0f70,#8c2981,#de4968,#fe9f6d,#fde724)',
+  mako_r:'linear-gradient(to right,#fde724,#fe9f6d,#de4968,#8c2981,#3b0f70,#0b0405)',
+  blues:'linear-gradient(to right,#f7fbff,#c6dbef,#6baed6,#2171b5,#084594)',
   blues_r:'linear-gradient(to right,#084594,#2171b5,#6baed6,#c6dbef,#f7fbff)',
 };
-
-function lerpColor(stops, t) {
-  t = Math.max(0, Math.min(1, t));
-  for (let i = 0; i < stops.length - 1; i++) {
-    const [t0, c0] = stops[i];
-    const [t1, c1] = stops[i + 1];
-    if (t >= t0 && t <= t1) {
-      const f = (t - t0) / (t1 - t0);
-      return c0.map((v, j) => Math.round(v + (c1[j] - v) * f));
-    }
-  }
-  return t <= 0 ? stops[0][1] : stops[stops.length - 1][1];
-}
-
-function remToColor(rem) {
-  const lo = parseFloat(document.getElementById('rem-min').value);
-  const hi = parseFloat(document.getElementById('rem-max').value);
-  const t = (rem - lo) / (hi - lo);
-  const cmapName = document.getElementById('rem-cmap').value;
-  return lerpColor(COLORMAPS[cmapName], t);
+function buildColorExpr(cmap,lo,hi){
+  const stops=COLORMAPS[cmap];
+  const ex=['interpolate',['linear'],['elevation']];
+  ex.push(lo-0.001,`rgb(${stops[0][1].join(',')})`);
+  for(const[t,[r,g,b]]of stops) ex.push(lo+t*(hi-lo),`rgb(${r},${g},${b})`);
+  return ex;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    LOGGING
 ═══════════════════════════════════════════════════════════════════════════ */
-const logEl = document.getElementById('log');
-function log(msg, state='running') {
-  const div = document.createElement('div');
-  div.className = `log-entry ${state}`;
-  const icons = { pending:'○', running:'◌', done:'✓', error:'✗' };
-  div.innerHTML = `<span class="icon">${icons[state]||'·'}</span><span class="msg">${msg}</span>`;
-  logEl.appendChild(div);
-  logEl.scrollTop = logEl.scrollHeight;
-  return div;
+const logEl=document.getElementById('log');
+function log(msg,state='running'){
+  const div=document.createElement('div');div.className=`log-entry ${state}`;
+  const ic={pending:'○',running:'◌',done:'✓',error:'✗'};
+  div.innerHTML=`<span class="icon">${ic[state]}</span><span class="msg">${msg}</span>`;
+  logEl.appendChild(div);logEl.scrollTop=logEl.scrollHeight;return div;
 }
-function logUpdate(el, msg, state='done') {
-  el.className = `log-entry ${state}`;
-  const icons = { pending:'○', running:'◌', done:'✓', error:'✗' };
-  el.innerHTML = `<span class="icon">${icons[state]||'·'}</span><span class="msg">${msg}</span>`;
-  logEl.scrollTop = logEl.scrollHeight;
+function logUpdate(el,msg,state='done'){
+  const ic={pending:'○',running:'◌',done:'✓',error:'✗'};
+  el.className=`log-entry ${state}`;
+  el.innerHTML=`<span class="icon">${ic[state]}</span><span class="msg">${msg}</span>`;
+  logEl.scrollTop=logEl.scrollHeight;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TILE MATH
 ═══════════════════════════════════════════════════════════════════════════ */
-function lon2tile(lon, z) { return Math.floor((lon + 180) / 360 * Math.pow(2, z)); }
-function lat2tile(lat, z) {
-  return Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
-}
-function tile2lon(x, z) { return x / Math.pow(2, z) * 360 - 180; }
-function tile2lat(y, z) {
-  const n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
-  return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
-}
-function lonlat2px(lon, lat, tx, ty, z, tileSize=512) {
-  const fx = (lon + 180) / 360 * Math.pow(2, z) - tx;
-  const latRad = lat * Math.PI / 180;
-  const fy = (1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * Math.pow(2, z) - ty;
-  return { px: Math.round(fx * tileSize), py: Math.round(fy * tileSize) };
+function lon2tile(lon,z){return Math.floor((lon+180)/360*2**z);}
+function lat2tile(lat,z){return Math.floor((1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*2**z);}
+function tile2lon(x,z){return x/2**z*360-180;}
+function tile2lat(y,z){const n=Math.PI-2*Math.PI*y/2**z;return 180/Math.PI*Math.atan(.5*(Math.exp(n)-Math.exp(-n)));}
+function lonlat2px(lon,lat,tx,ty,z,sz=512){
+  const fx=(lon+180)/360*2**z-tx;
+  const lr=lat*Math.PI/180;
+  const fy=(1-Math.log(Math.tan(lr)+1/Math.cos(lr))/Math.PI)/2*2**z-ty;
+  return{px:Math.round(fx*sz),py:Math.round(fy*sz)};
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   MAPTERHORN TERRARIUM DECODER
+   MAPTERHORN TILE LOADER
+   Always fetches at the exact z requested (same z as the REM tile being built).
+   The rem-dem source maxzoom is set to match demZoom, preventing MapLibre
+   from requesting finer tiles than what was sampled.
 ═══════════════════════════════════════════════════════════════════════════ */
-async function loadTileImage(z, x, y) {
-  const key = `${z}/${x}/${y}`;
-  if (imgCache.has(key)) return imgCache.get(key);
-  const url = MAPTERHORN.replace('{z}',z).replace('{x}',x).replace('{y}',y);
-  const img = await new Promise((res, rej) => {
-    const i = new Image(); i.crossOrigin = 'anonymous';
-    i.onload = () => res(i);
-    i.onerror = () => rej(new Error(`Tile load failed: ${url}`));
-    i.src = url;
+async function loadTileImage(z,x,y){
+  const key=`${z}/${x}/${y}`;
+  if(imgCache.has(key))return imgCache.get(key);
+  const url=MAPTERHORN.replace('{z}',z).replace('{x}',x).replace('{y}',y);
+  const img=await new Promise((res,rej)=>{
+    const i=new Image();i.crossOrigin='anonymous';
+    i.onload=()=>res(i);i.onerror=()=>rej(new Error(`DEM tile ${url}`));i.src=url;
   });
-  const c = new OffscreenCanvas(512, 512);
-  c.getContext('2d').drawImage(img, 0, 0);
-  const data = c.getContext('2d').getImageData(0, 0, 512, 512);
-  imgCache.set(key, data);
-  return data;
+  const c=new OffscreenCanvas(512,512);
+  c.getContext('2d').drawImage(img,0,0);
+  const data=c.getContext('2d').getImageData(0,0,512,512);
+  imgCache.set(key,data);return data;
 }
 
-async function getElevation(lon, lat, z) {
-  const tx = lon2tile(lon, z), ty = lat2tile(lat, z);
-  let imgData;
-  try { imgData = await loadTileImage(z, tx, ty); } catch(e) { return null; }
-  const { px, py } = lonlat2px(lon, lat, tx, ty, z, 512);
-  const cx = Math.max(0, Math.min(511, px)), cy = Math.max(0, Math.min(511, py));
-  const i = (cy * 512 + cx) * 4;
-  const r = imgData.data[i], g = imgData.data[i+1], b = imgData.data[i+2];
-  return (r * 256 + g + b / 256) - 32768;
+async function getElevation(lon,lat,z){
+  const tx=lon2tile(lon,z),ty=lat2tile(lat,z);
+  let d;try{d=await loadTileImage(z,tx,ty);}catch(e){return null;}
+  const{px,py}=lonlat2px(lon,lat,tx,ty,z,512);
+  const cx=Math.max(0,Math.min(511,px)),cy=Math.max(0,Math.min(511,py));
+  const i=(cy*512+cx)*4;
+  return(d.data[i]*256+d.data[i+1]+d.data[i+2]/256)-32768;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   OVERPASS
+   OVERPASS + SEGMENT ORDERING
 ═══════════════════════════════════════════════════════════════════════════ */
-async function fetchLongestRiver(bbox) {
-  const [s, w, n, e] = bbox;
-  const query = `[out:json][timeout:45];(way[waterway=river][name](${s},${w},${n},${e});way[waterway=stream][name](${s},${w},${n},${e}););out geom;`;
-  const resp = await fetch(getOverpassUrl(), {
-    method: 'POST',
-    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-    body: 'data=' + encodeURIComponent(query)
-  });
-  if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status}`);
-  const json = await resp.json();
-  if (!json.elements || json.elements.length === 0) throw new Error('No waterways found in bbox');
-
-  const byName = {};
-  for (const el of json.elements) {
-    if (!el.geometry || !el.tags?.name) continue;
-    const name = el.tags.name;
-    if (!byName[name]) byName[name] = { name, segments: [], totalLen: 0 };
+async function fetchLongestRiver(bbox){
+  const[s,w,n,e]=bbox;
+  const q=`[out:json][timeout:45];(way[waterway=river][name](${s},${w},${n},${e});way[waterway=stream][name](${s},${w},${n},${e}););out geom;`;
+  const resp=await fetch(getOverpassUrl(),{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
+  if(!resp.ok)throw new Error(`Overpass HTTP ${resp.status}`);
+  const json=await resp.json();
+  if(!json.elements?.length)throw new Error('No waterways found in bbox');
+  const byName={};
+  for(const el of json.elements){
+    if(!el.geometry||!el.tags?.name)continue;
+    const name=el.tags.name;
+    if(!byName[name])byName[name]={name,segments:[],totalLen:0};
     byName[name].segments.push(el.geometry);
-    let len = 0;
-    for (let i = 1; i < el.geometry.length; i++)
-      len += haversine(el.geometry[i-1].lat, el.geometry[i-1].lon, el.geometry[i].lat, el.geometry[i].lon);
-    byName[name].totalLen += len;
+    let len=0;
+    for(let i=1;i<el.geometry.length;i++)
+      len+=haversine(el.geometry[i-1].lat,el.geometry[i-1].lon,el.geometry[i].lat,el.geometry[i].lon);
+    byName[name].totalLen+=len;
   }
-
-  const sorted = Object.values(byName).sort((a,b) => b.totalLen - a.totalLen);
-  if (sorted.length === 0) throw new Error('No named waterways resolved');
-  const best = sorted[0];
-  const allCoords = [];
-  for (const seg of best.segments)
-    for (const pt of seg) allCoords.push([pt.lon, pt.lat]);
-
-  // Chain segments in geographic order (OSM ways arrive unordered/unoriented)
-  const orderedSegments = orderSegments(best.segments);
-
-  return { name: best.name, lengthKm: best.totalLen / 1000, coords: allCoords,
-           segments: best.segments, orderedSegments };
+  const sorted=Object.values(byName).sort((a,b)=>b.totalLen-a.totalLen);
+  if(!sorted.length)throw new Error('No named waterways resolved');
+  const best=sorted[0];
+  return{name:best.name,lengthKm:best.totalLen/1000,segments:best.segments,orderedSegments:orderSegments(best.segments)};
 }
 
-/**
- * Greedy segment chaining: repeatedly attach the next unvisited segment
- * whose nearest endpoint is closest to the current chain tail.
- * Flips the segment if its end is closer than its start.
- * This gives a roughly contiguous ordered polyline from the raw OSM way soup.
- */
-function orderSegments(segments) {
-  if (segments.length <= 1) return segments;
+function orderSegments(segs){
+  if(segs.length<=1)return segs;
+  const d2=(a,b)=>{const dl=a.lat-b.lat,dn=a.lon-b.lon;return dl*dl+dn*dn;};
+  const rem=segs.map(s=>({s}));const out=[rem.splice(0,1)[0].s];
+  while(rem.length){
+    const tail=out[out.length-1],te=tail[tail.length-1];
+    let bi=-1,bd=Infinity,bf=false;
+    for(let i=0;i<rem.length;i++){
+      const{s}=rem[i];const ds=d2(te,s[0]),de=d2(te,s[s.length-1]);const d=Math.min(ds,de);
+      if(d<bd){bd=d;bi=i;bf=de<ds;}
+    }
+    const{s}=rem.splice(bi,1)[0];out.push(bf?[...s].reverse():s);
+  }
+  return out;
+}
 
-  // Each segment is an array of {lat,lon} nodes
-  const ptDist = (a, b) => {
-    const dlat = a.lat - b.lat, dlon = a.lon - b.lon;
-    return dlat*dlat + dlon*dlon; // squared degrees, fine for sorting
-  };
-
-  const remaining = segments.map((seg, i) => ({ seg, i }));
-  const ordered = [];
-
-  // Start with the segment that has the most extreme upstream point
-  // (lowest latitude as heuristic — works for W→E or N→S rivers)
-  // Actually: just pick index 0 as seed, greedy will handle the rest
-  const first = remaining.splice(0, 1)[0];
-  ordered.push(first.seg);
-
-  while (remaining.length > 0) {
-    const tail = ordered[ordered.length - 1];
-    const tailEnd = tail[tail.length - 1]; // last node of current chain
-
-    let bestIdx = -1, bestDist = Infinity, bestFlipped = false;
-    for (let i = 0; i < remaining.length; i++) {
-      const { seg } = remaining[i];
-      const dStart = ptDist(tailEnd, seg[0]);
-      const dEnd   = ptDist(tailEnd, seg[seg.length - 1]);
-      const d = Math.min(dStart, dEnd);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
-        bestFlipped = dEnd < dStart; // flip if end is closer than start
+/* ═══════════════════════════════════════════════════════════════════════════
+   VIEWPORT CLIPPING  — clip river segment nodes to viewport before sampling
+   so samples are concentrated in the visible area, not the full river.
+   Uses simple lon/lat bbox clip (segments are lon/lat from Overpass).
+═══════════════════════════════════════════════════════════════════════════ */
+function clipSegmentsToViewport(segments, vw, vs, ve, vn) {
+  const clipped = [];
+  for (const seg of segments) {
+    // Keep only nodes inside viewport, split into sub-runs on exit
+    let run = [];
+    for (const pt of seg) {
+      const inside = pt.lon>=vw && pt.lon<=ve && pt.lat>=vs && pt.lat<=vn;
+      if (inside) {
+        run.push(pt);
+      } else if (run.length > 0) {
+        clipped.push(run);
+        run = [];
       }
     }
-
-    const { seg } = remaining.splice(bestIdx, 1)[0];
-    ordered.push(bestFlipped ? [...seg].reverse() : seg);
+    if (run.length > 0) clipped.push(run);
   }
-
-  return ordered;
+  return clipped;
 }
-
-function haversine(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const φ1 = lat1 * Math.PI/180, φ2 = lat2 * Math.PI/180;
-  const Δφ = (lat2-lat1) * Math.PI/180, Δλ = (lon2-lon1) * Math.PI/180;
-  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   SAMPLING
-═══════════════════════════════════════════════════════════════════════════ */
-function sampleAlongLine(coords, nSamples) {
-  const dist = [0];
-  for (let i = 1; i < coords.length; i++)
-    dist.push(dist[i-1] + haversine(coords[i-1][1], coords[i-1][0], coords[i][1], coords[i][0]));
-  const total = dist[dist.length-1];
-  if (nSamples < 2 || total === 0) return coords.slice(0, nSamples);
-  const step = total / (nSamples - 1);
-  const samples = [];
-  for (let s = 0; s < nSamples; s++) {
-    const target = s * step;
-    let idx = dist.findIndex(d => d >= target);
-    if (idx < 0) idx = coords.length - 1;
-    if (idx === 0) { samples.push(coords[0]); continue; }
-    const t = (target - dist[idx-1]) / (dist[idx] - dist[idx-1]);
-    samples.push([coords[idx-1][0] + t*(coords[idx][0]-coords[idx-1][0]),
-                  coords[idx-1][1] + t*(coords[idx][1]-coords[idx-1][1])]);
+function sampleAlongLine(coords,nSamples){
+  const dist=[0];
+  for(let i=1;i<coords.length;i++)dist.push(dist[i-1]+haversine(coords[i-1][1],coords[i-1][0],coords[i][1],coords[i][0]));
+  const total=dist[dist.length-1];
+  if(nSamples<2||total===0)return coords.slice(0,nSamples);
+  const step=total/(nSamples-1),out=[];
+  for(let s=0;s<nSamples;s++){
+    const target=s*step;
+    let idx=dist.findIndex(d=>d>=target);if(idx<0)idx=coords.length-1;
+    if(idx===0){out.push(coords[0]);continue;}
+    const t=(target-dist[idx-1])/(dist[idx]-dist[idx-1]);
+    out.push([coords[idx-1][0]+t*(coords[idx][0]-coords[idx-1][0]),coords[idx-1][1]+t*(coords[idx][1]-coords[idx-1][1])]);
   }
-  return samples;
+  return out;
 }
 
-function sampleRiverSegments(segments, nSamples) {
-  const lengths = segments.map(seg => {
-    let len = 0;
-    for (let i = 1; i < seg.length; i++)
-      len += haversine(seg[i-1].lat, seg[i-1].lon, seg[i].lat, seg[i].lon);
-    return len;
-  });
-  const totalLength = lengths.reduce((a,b)=>a+b,0);
-  const samples = [];
-  for (let s = 0; s < segments.length; s++) {
-    const count = Math.max(1, Math.round(nSamples * lengths[s] / totalLength));
-    const coords = segments[s].map(p => [p.lon, p.lat]);
-    samples.push(...sampleAlongLine(coords, count));
+function sampleRiverSegments(segs,nSamples){
+  const lens=segs.map(seg=>{let l=0;for(let i=1;i<seg.length;i++)l+=haversine(seg[i-1].lat,seg[i-1].lon,seg[i].lat,seg[i].lon);return l;});
+  const total=lens.reduce((a,b)=>a+b,0);const out=[];
+  for(let s=0;s<segs.length;s++){
+    const count=Math.max(1,Math.round(nSamples*lens[s]/total));
+    out.push(...sampleAlongLine(segs[s].map(p=>[p.lon,p.lat]),count));
   }
-  return samples.slice(0, nSamples);
+  return out.slice(0,nSamples);
 }
 
-async function sampleElevations(samples, demZoom) {
-  const results = [];
-  for (const [lon, lat] of samples) {
-    const elev = await getElevation(lon, lat, demZoom);
-    if (elev !== null) results.push({ lon, lat, elev });
+async function sampleElevations(samples,demZoom){
+  const results=[];
+  for(const[lon,lat]of samples){
+    const elev=await getElevation(lon,lat,demZoom);
+    if(elev!==null)results.push({lon,lat,mx:lonToMx(lon),my:latToMy(lat),elev});
   }
   return results;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   IDW
+   CPU IDW  (EPSG:3857 distances)
+   MIN_DIST clamp prevents division-by-zero but is now ~half a DEM pixel at
+   typical zoom, not a magic constant that causes speckle.
 ═══════════════════════════════════════════════════════════════════════════ */
-function encodeTerrarium(elev) {
-  const v = elev + 32768;
-  const r = Math.floor(v / 256);
-  const g = Math.floor(v % 256);
-  const b = Math.round((v - Math.floor(v)) * 256);
-  return [Math.max(0,Math.min(255,r)), Math.max(0,Math.min(255,g)), Math.max(0,Math.min(255,b))];
-}
-
-function idwValue(queryLon, queryLat, points, power) {
-  let sumW = 0, sumWZ = 0;
-  for (const pt of points) {
-    const d = haversine(queryLat, queryLon, pt.lat, pt.lon);
-    if (d < 1) return pt.elev;
-    const w = 1 / Math.pow(d, power);
-    sumW += w; sumWZ += w * pt.elev;
+function cpuIdwValue(qMx,qMy,pts,power){
+  let sw=0,swz=0;
+  for(const pt of pts){
+    const d2=(qMx-pt.mx)**2+(qMy-pt.my)**2;
+    // clamp: minimum 10m in 3857 metres ≈ 10 pixels at z14
+    const d=Math.sqrt(d2);
+    const dc=d<10?10:d;
+    const w=1/dc**power;
+    sw+=w;swz+=w*pt.elev;
   }
-  return sumW > 0 ? sumWZ / sumW : 0;
+  return sw>0?swz/sw:0;
 }
 
-async function buildREMTile(z, x, y, riverPts, power) {
-  const cacheKey = `${z}/${x}/${y}`;
-  if (tileCache.has(cacheKey)) return tileCache.get(cacheKey);
+function encodeTerrarium(elev){
+  const v=elev+32768;
+  const r=Math.floor(v/256),g=Math.floor(v%256),b=Math.round((v-Math.floor(v))*256);
+  return[Math.max(0,Math.min(255,r)),Math.max(0,Math.min(255,g)),Math.max(0,Math.min(255,b))];
+}
 
-  const tileSize = 256;
-  let demData = null;
-  try { demData = await loadTileImage(z, x, y); } catch(e) {}
+/* ═══════════════════════════════════════════════════════════════════════════
+   GPU IDW via WebGL2
+   Architecture:
+   - Sample points packed as RGBA32F texture row: (mx, my, elev, 0)
+   - For each tile: render a 256×256 quad; each fragment computes IDW in
+     EPSG:3857, outputs terrarium-encoded RGB
+   - Uses EXT_color_buffer_float (required for RGBA32F framebuffer)
+═══════════════════════════════════════════════════════════════════════════ */
+let gl=null, glProg=null, glPointTex=null, glFbo=null, glRenderTex=null;
+let glInitialised=false, gpuAvailable=false;
 
-  const canvas = new OffscreenCanvas(tileSize, tileSize);
-  const ctx = canvas.getContext('2d');
-  const imgData = ctx.createImageData(tileSize, tileSize);
+function initWebGL2(){
+  const canvas=new OffscreenCanvas(256,256);
+  gl=canvas.getContext('webgl2');
+  if(!gl){console.warn('WebGL2 not available');return false;}
+  // Require float color buffer for output
+  if(!gl.getExtension('EXT_color_buffer_float')){
+    console.warn('EXT_color_buffer_float not available');gl=null;return false;
+  }
 
-  const tileLonW = tile2lon(x, z), tileLonE = tile2lon(x+1, z);
-  const tileLatN = tile2lat(y, z), tileLatS = tile2lat(y+1, z);
-  const pad = (tileLonE - tileLonW) * 3;
-  const nearPts = riverPts.filter(pt =>
-    pt.lon >= tileLonW - pad && pt.lon <= tileLonE + pad &&
-    pt.lat >= tileLatS - pad && pt.lat <= tileLatN + pad
-  );
+  const vs=`#version 300 es
+    in vec2 a_pos;
+    out vec2 v_uv;
+    void main(){v_uv=a_pos*.5+.5;gl_Position=vec4(a_pos,0,1);}`;
 
-  if (nearPts.length === 0) {
-    for (let i = 0; i < imgData.data.length; i+=4) {
-      const [r,g,b] = encodeTerrarium(0);
-      imgData.data[i]=r; imgData.data[i+1]=g; imgData.data[i+2]=b; imgData.data[i+3]=255;
-    }
-  } else {
-    for (let py = 0; py < tileSize; py++) {
-      for (let px = 0; px < tileSize; px++) {
-        const lon = tileLonW + (px / tileSize) * (tileLonE - tileLonW);
-        const lat = tileLatN + (py / tileSize) * (tileLatS - tileLatN);
-
-        let demElev = 0;
-        if (demData) {
-          const sx = Math.min(511, Math.round(px * 512 / tileSize));
-          const sy = Math.min(511, Math.round(py * 512 / tileSize));
-          const i4 = (sy * 512 + sx) * 4;
-          const r=demData.data[i4], g=demData.data[i4+1], b=demData.data[i4+2];
-          demElev = (r * 256 + g + b/256) - 32768;
-        }
-
-        const idwElev = idwValue(lon, lat, nearPts, power);
-        const rem = demElev - idwElev;
-        const [r,g,b] = encodeTerrarium(rem);
-        const i = (py * tileSize + px) * 4;
-        imgData.data[i]=r; imgData.data[i+1]=g; imgData.data[i+2]=b; imgData.data[i+3]=255;
+  // Fragment shader: per-pixel IDW in 3857 metres, outputs terrarium RGB
+  const fs=`#version 300 es
+    precision highp float;
+    uniform sampler2D u_pts;   // RGBA32F: (mx, my, elev, 0) per sample
+    uniform int       u_n;     // number of sample points
+    uniform float     u_power;
+    uniform float     u_tileX; // tile origin mx (3857)
+    uniform float     u_tileY; // tile origin my (3857)
+    uniform float     u_tileW; // tile width  mx (3857)
+    uniform float     u_tileH; // tile height my (3857)
+    in vec2 v_uv;
+    out vec4 outColor;
+    void main(){
+      float qmx = u_tileX + v_uv.x * u_tileW;
+      float qmy = u_tileY + (1.0-v_uv.y) * u_tileH; // flip y (tile y grows down)
+      float sumW=0.0, sumWZ=0.0;
+      for(int i=0;i<u_n;i++){
+        vec4 p = texelFetch(u_pts, ivec2(i,0), 0);
+        float dx=qmx-p.x, dy=qmy-p.y;
+        float d=sqrt(dx*dx+dy*dy);
+        float dc=max(d,10.0); // 10m min
+        float w=1.0/pow(dc,u_power);
+        sumW+=w; sumWZ+=w*p.z;
       }
+      float wse = sumW>0.0 ? sumWZ/sumW : 0.0;
+      // Terrarium encode — note: we write raw float, decoded in buildREMTileGPU
+      outColor = vec4(wse, 0.0, 0.0, 1.0);
+    }`;
+
+  function compile(type,src){
+    const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error('GL shader: '+gl.getShaderInfoLog(s));
+    return s;
+  }
+  glProg=gl.createProgram();
+  gl.attachShader(glProg,compile(gl.VERTEX_SHADER,vs));
+  gl.attachShader(glProg,compile(gl.FRAGMENT_SHADER,fs));
+  gl.linkProgram(glProg);
+  if(!gl.getProgramParameter(glProg,gl.LINK_STATUS))throw new Error('GL link: '+gl.getProgramInfoLog(glProg));
+
+  // Fullscreen quad
+  const buf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+  const loc=gl.getAttribLocation(glProg,'a_pos');
+  gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+
+  // FBO with RGBA32F texture (output)
+  glRenderTex=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,glRenderTex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,256,256,0,gl.RGBA,gl.FLOAT,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+  glFbo=gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER,glFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,glRenderTex,0);
+
+  // Point texture (RGBA32F, updated per pipeline run)
+  glPointTex=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,glPointTex);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+
+  glInitialised=true;return true;
+}
+
+function uploadPointsToGPU(pts){
+  if(!gl||!glPointTex)return;
+  // pack: x=mx, y=my, z=elev, w=0
+  const data=new Float32Array(pts.length*4);
+  for(let i=0;i<pts.length;i++){data[i*4]=pts[i].mx;data[i*4+1]=pts[i].my;data[i*4+2]=pts[i].elev;}
+  gl.bindTexture(gl.TEXTURE_2D,glPointTex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,pts.length,1,0,gl.RGBA,gl.FLOAT,data);
+}
+
+function gpuIdwTile(lonW,latN,lonE,latS,power){
+  // Returns Float32Array[256*256] of WSE values (metres)
+  if(!gl||!glProg)return null;
+  const tileX=lonToMx(lonW),tileW=lonToMx(lonE)-tileX;
+  const tileYS=latToMy(latS),tileYN=latToMy(latN);
+  const tileH=tileYN-tileYS;// positive, latN>latS in 3857
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER,glFbo);
+  gl.viewport(0,0,256,256);
+  gl.useProgram(glProg);
+
+  // Bind point texture to unit 0
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D,glPointTex);
+  gl.uniform1i(gl.getUniformLocation(glProg,'u_pts'),0);
+  gl.uniform1i(gl.getUniformLocation(glProg,'u_n'),riverPoints.length);
+  gl.uniform1f(gl.getUniformLocation(glProg,'u_power'),power);
+  gl.uniform1f(gl.getUniformLocation(glProg,'u_tileX'),tileX);
+  gl.uniform1f(gl.getUniformLocation(glProg,'u_tileY'),tileYS);
+  gl.uniform1f(gl.getUniformLocation(glProg,'u_tileW'),tileW);
+  gl.uniform1f(gl.getUniformLocation(glProg,'u_tileH'),tileH);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+
+  // Read back RGBA32F — we only use .r (WSE)
+  const buf=new Float32Array(256*256*4);
+  gl.readPixels(0,0,256,256,gl.RGBA,gl.FLOAT,buf);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+
+  const wse=new Float32Array(256*256);
+  for(let i=0;i<256*256;i++)wse[i]=buf[i*4];
+  return wse;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNIFIED REM TILE BUILDER
+   GPU or CPU IDW — uses ALL riverPoints, no spatial filter.
+   With 100-200 points the per-tile cost is trivial.
+   Filtering was the speckle source: tiles outside the filter bbox got wse=0
+   → rem = demElev → max colormap = white/orange speckle blocks.
+═══════════════════════════════════════════════════════════════════════════ */
+async function buildREMTile(z,x,y,riverPts,power){
+  const key=`${z}/${x}/${y}`;
+  if(tileCache.has(key))return tileCache.get(key);
+
+  const sz=256;
+  let demData=null;try{demData=await loadTileImage(z,x,y);}catch(e){}
+
+  const canvas=new OffscreenCanvas(sz,sz);
+  const ctx=canvas.getContext('2d');
+  const imgData=ctx.createImageData(sz,sz);
+
+  const lonW=tile2lon(x,z),lonE=tile2lon(x+1,z);
+  const latN=tile2lat(y,z),latS=tile2lat(y+1,z);
+
+  // GPU path: compute WSE for entire tile at once (all points, no filter)
+  const useGpu=document.getElementById('gpu-toggle').checked&&gpuAvailable;
+  let wseArr=null;
+  if(useGpu) wseArr=gpuIdwTile(lonW,latN,lonE,latS,power);
+
+  for(let py=0;py<sz;py++){
+    for(let px=0;px<sz;px++){
+      let demElev=0;
+      if(demData){
+        const sx=Math.min(511,Math.round(px*512/sz));
+        const sy=Math.min(511,Math.round(py*512/sz));
+        const i4=(sy*512+sx)*4;const{data:d}=demData;
+        demElev=(d[i4]*256+d[i4+1]+d[i4+2]/256)-32768;
+      }
+      let wse;
+      if(wseArr){
+        wse=wseArr[py*sz+px];
+      }else{
+        if(riverPts.length===0){wse=0;}
+        else{
+          const lon=lonW+(px/sz)*(lonE-lonW);
+          const lat=latN+(py/sz)*(latS-latN);
+          wse=cpuIdwValue(lonToMx(lon),latToMy(lat),riverPts,power);
+        }
+      }
+      const[r,g,b]=encodeTerrarium(demElev-wse);
+      const i=(py*sz+px)*4;
+      imgData.data[i]=r;imgData.data[i+1]=g;imgData.data[i+2]=b;imgData.data[i+3]=255;
     }
   }
 
-  ctx.putImageData(imgData, 0, 0);
-  const blob = await canvas.convertToBlob({ type: 'image/png' });
-  const buf = await blob.arrayBuffer();
-  tileCache.set(cacheKey, buf);
-  tileCacheCount++;
-  document.getElementById('s-tiles').textContent = tileCacheCount;
+  ctx.putImageData(imgData,0,0);
+  const buf=await(await canvas.convertToBlob({type:'image/png'})).arrayBuffer();
+  tileCache.set(key,buf);tileCacheCount++;
+  document.getElementById('s-tiles').textContent=tileCacheCount;
   return buf;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MAP SETUP
 ═══════════════════════════════════════════════════════════════════════════ */
-function initMap(center, zoom) {
-  if (map) { map.remove(); map = null; tileCache.clear(); tileCacheCount = 0; }
-
-  map = new maplibregl.Map({
-    container: 'map',
-    style: {
-      version: 8,
-      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-      sources: {
-        osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' },
-        dem: { type: 'raster-dem', tiles: [MAPTERHORN], tileSize: 512, encoding: 'terrarium', maxzoom: 14, attribution: '© Mapterhorn' }
+function initMap(center,zoom){
+  if(map){map.remove();map=null;tileCache.clear();tileCacheCount=0;}
+  map=new maplibregl.Map({
+    container:'map',
+    style:{
+      version:8,
+      glyphs:'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+      sources:{
+        osm:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,attribution:'© OpenStreetMap'},
+        dem:{type:'raster-dem',tiles:[MAPTERHORN],tileSize:512,encoding:'terrarium',maxzoom:18,attribution:'© Mapterhorn'}
       },
-      layers: [
-        { id: 'osm', type: 'raster', source: 'osm', paint: {'raster-opacity': 0.55} },
-        { id: 'hillshade', type: 'hillshade', source: 'dem',
-          paint: { 'hillshade-illumination-direction': 335, 'hillshade-exaggeration': 0.5,
-                   'hillshade-shadow-color': '#2a2e3a', 'hillshade-accent-color': '#4fc3a1' } }
+      layers:[
+        {id:'osm',type:'raster',source:'osm',paint:{'raster-opacity':0.55}},
+        {id:'hillshade',type:'hillshade',source:'dem',
+          paint:{'hillshade-illumination-direction':335,'hillshade-exaggeration':0.5,
+                 'hillshade-shadow-color':'#1a1a1a','hillshade-accent-color':'#ffffff'}}
       ]
     },
-    center, zoom, maxZoom: 15
+    center,zoom,maxZoom:15
   });
-
-  map.addControl(new maplibregl.NavigationControl(), 'top-right');
-
-  // Geocoder using Nominatim
-  const geocoder = new MaplibreGeocoder({
-    forwardGeocode: async (config) => {
-      const features = [];
-      try {
-        const req = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(config.query)}&format=geojson&polygon_geojson=1&addressdetails=1`);
-        const geojson = await req.json();
-        for (const feat of geojson.features) {
-          const bbox = feat.bbox;
-          const center = [feat.geometry.coordinates[0], feat.geometry.coordinates[1]];
-          features.push({
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: center },
-            place_name: feat.properties.display_name,
-            properties: feat.properties,
-            text: feat.properties.display_name,
-            place_type: ['place'],
-            bbox
-          });
-        }
-      } catch(e) { console.error('Geocoder error:', e); }
-      return { features };
-    }
-  }, { maplibregl });
-
-  map.addControl(geocoder, 'top-left');
+  map.addControl(new maplibregl.NavigationControl(),'top-right');
   return map;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   REM PROTOCOL — remr:// serves colorized PNG tiles directly
-   (pure raster source, no hillshade layer on REM → no NaN speckle)
+   GEOCODER
 ═══════════════════════════════════════════════════════════════════════════ */
-function registerRemRasterProtocol(power) {
-  try { maplibregl.removeProtocol('remr'); } catch(e) {}
-  maplibregl.addProtocol('remr', async (params) => {
-    const parts = params.url.replace('remr://tiles/', '').split('/');
-    const [z, x, y] = parts.map(Number);
-    const remBuf = await buildREMTile(z, x, y, riverPoints, power);
+function initGeocoder(){
+  const qEl=document.getElementById('geocoder-q');
+  const btn=document.getElementById('geocoder-btn');
+  const res=document.getElementById('geocoder-results');
+  async function search(){
+    const q=qEl.value.trim();if(!q)return;
+    res.style.display='none';res.innerHTML='';
+    try{
+      const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=geojson&limit=5`);
+      const gj=await r.json();
+      if(!gj.features.length){res.innerHTML='<div class="gc-item" style="color:var(--subtle)">No results</div>';res.style.display='block';return;}
+      for(const f of gj.features){
+        const d=document.createElement('div');d.className='gc-item';d.textContent=f.properties.display_name;
+        d.addEventListener('click',()=>{
+          const[lon,lat]=f.geometry.coordinates;
+          map.flyTo({center:[lon,lat],zoom:12,duration:700});
+          res.style.display='none';qEl.value=f.properties.display_name.split(',')[0];
+        });res.appendChild(d);
+      }res.style.display='block';
+    }catch(e){console.warn('Geocoder:',e);}
+  }
+  btn.addEventListener('click',search);
+  qEl.addEventListener('keydown',e=>{if(e.key==='Enter')search();if(e.key==='Escape')res.style.display='none';});
+  document.addEventListener('click',e=>{if(!e.target.closest('.geo-wrap'))res.style.display='none';});
+}
 
-    // Decode terrarium → apply colormap
-    const blob2 = new Blob([remBuf], {type:'image/png'});
-    const bmpUrl = URL.createObjectURL(blob2);
-    const img = await new Promise((res,rej) => {
-      const i = new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=bmpUrl;
-    });
-    URL.revokeObjectURL(bmpUrl);
-    const c = new OffscreenCanvas(256, 256);
-    const ctx = c.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    const id = ctx.getImageData(0, 0, 256, 256);
-    const out = ctx.createImageData(256, 256);
-    for (let i = 0; i < id.data.length; i+=4) {
-      const r=id.data[i], g=id.data[i+1], b=id.data[i+2];
-      const rem = (r*256+g+b/256) - 32768;
-      const col = remToColor(rem);
-      out.data[i]=col[0]; out.data[i+1]=col[1]; out.data[i+2]=col[2]; out.data[i+3]=220;
-    }
-    ctx.putImageData(out, 0, 0);
-    const finalBlob = await c.convertToBlob({type:'image/png'});
-    return { data: await finalBlob.arrayBuffer() };
+/* ═══════════════════════════════════════════════════════════════════════════
+   REM PROTOCOL + LAYERS
+   rem:// protocol handles any zoom requested by MapLibre.
+   No minzoom/maxzoom pinning — zooming in requests finer tiles naturally.
+═══════════════════════════════════════════════════════════════════════════ */
+function registerREMProtocol(riverPts,power){
+  try{maplibregl.removeProtocol('rem');}catch(e){}
+  maplibregl.addProtocol('rem',async(params)=>{
+    const[z,x,y]=params.url.replace('rem://tiles/','').split('/').map(Number);
+    return{data:await buildREMTile(z,x,y,riverPts,power)};
   });
 }
 
-function addREMProtocol(riverPts, power) {
-  try { maplibregl.removeProtocol('rem'); } catch(e) {}
-  maplibregl.addProtocol('rem', async (params) => {
-    const parts = params.url.replace('rem://tiles/', '').split('/');
-    const [z, x, y] = parts.map(Number);
-    return { data: await buildREMTile(z, x, y, riverPts, power) };
+function addREMLayersToMap(bbox){
+  if(!map)return;
+  lastBbox=bbox;
+  const[s,w,n,e]=bbox;
+  for(const id of['rem-color'])if(map.getLayer(id))map.removeLayer(id);
+  for(const id of['rem-dem'])if(map.getSource(id))map.removeSource(id);
+  // No minzoom/maxzoom pinning — MapLibre requests tiles at whatever zoom
+  // the user is at, rem:// protocol builds them on demand and caches.
+  // Zooming in naturally requests finer tiles → progressive refinement.
+  map.addSource('rem-dem',{
+    type:'raster-dem',tiles:['rem://tiles/{z}/{x}/{y}'],
+    tileSize:256,encoding:'terrarium',bounds:[w,s,e,n],maxzoom:14
   });
-}
-
-function addREMLayersToMap(bbox) {
-  if (!map) return;
-  lastBbox = bbox;
-  const [s, w, n, e] = bbox;
-
-  // Clean up previous REM layers/sources
-  ['rem-color'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
-  ['rem-raster'].forEach(id => { if (map.getSource(id)) map.removeSource(id); });
-
-  const power = parseFloat(document.getElementById('p-power').value);
-  registerRemRasterProtocol(power);
-
-  // Colorized raster source only — no hillshade on REM (avoids NaN speckle)
-  map.addSource('rem-raster', {
-    type: 'raster',
-    tiles: ['remr://tiles/{z}/{x}/{y}'],
-    tileSize: 256,
-    bounds: [w, s, e, n],
-    maxzoom: 13
-  });
-
-  const opacity = parseInt(document.getElementById('rem-opacity').value) / 100;
   map.addLayer({
-    id: 'rem-color',
-    type: 'raster',
-    source: 'rem-raster',
-    paint: { 'raster-opacity': opacity, 'raster-resampling': 'nearest' }
+    id:'rem-color',type:'color-relief',source:'rem-dem',
+    paint:{
+      'color-relief-color':buildColorExpr(document.getElementById('rem-cmap').value,parseFloat(document.getElementById('rem-min').value),parseFloat(document.getElementById('rem-max').value)),
+      'color-relief-opacity':parseInt(document.getElementById('rem-opacity').value)/100
+    }
   });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    RIVER + SAMPLE LAYERS
 ═══════════════════════════════════════════════════════════════════════════ */
-function addRiverLayers(segments, sampledPts, name) {
-  ['river','river-label','samples'].forEach(id => { if(map.getLayer(id)) map.removeLayer(id); });
-  ['river-src','samples-src'].forEach(id => { if(map.getSource(id)) map.removeSource(id); });
+function setRiverSource(segments,name){
+  if(map.getLayer('river'))map.removeLayer('river');
+  if(map.getSource('river-src'))map.removeSource('river-src');
+  map.addSource('river-src',{type:'geojson',data:{type:'FeatureCollection',features:[{type:'Feature',
+    geometry:{type:'MultiLineString',coordinates:segments.map(s=>s.map(p=>[p.lon,p.lat]))},
+    properties:{name}
+  }]}});
+  map.addLayer({id:'river',type:'line',source:'river-src',
+    paint:{'line-color':'#ffffff','line-width':['interpolate',['linear'],['zoom'],8,1,13,3],'line-opacity':0.7}});
+}
 
-  map.addSource('river-src', {
-    type: 'geojson',
-    data: {
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        geometry: {
-          type: 'MultiLineString',
-          coordinates: segments.map(seg => seg.map(p => [p.lon, p.lat]))
-        },
-        properties: { name }
-      }]
-    }
+function setSampleLayer(pts){
+  if(map.getLayer('samples'))map.removeLayer('samples');
+  if(map.getSource('samples-src'))map.removeSource('samples-src');
+  map.addSource('samples-src',{type:'geojson',data:{type:'FeatureCollection',
+    features:pts.map(p=>({type:'Feature',geometry:{type:'Point',coordinates:[p.lon,p.lat]},properties:{elev:Math.round(p.elev*10)/10}}))}});
+  map.addLayer({id:'samples',type:'circle',source:'samples-src',
+    layout:{'visibility':'none'}, // hidden by default
+    paint:{'circle-radius':3,'circle-color':'#fbbf24','circle-stroke-color':'#09090b','circle-stroke-width':1,'circle-opacity':0.9}});
+  // hover popup
+  map.on('mouseenter','samples',e=>{
+    map.getCanvas().style.cursor='pointer';
+    new maplibregl.Popup({closeButton:false,offset:6})
+      .setLngLat(e.lngLat).setHTML(`<span style="font-size:12px;color:#fff">${e.features[0].properties.elev} m</span>`).addTo(map);
   });
-  map.addLayer({
-    id: 'river', type: 'line', source: 'river-src',
-    paint: { 'line-color': '#4fc3a1', 'line-width': ['interpolate',['linear'],['zoom'],8,1.5,13,4], 'line-opacity': 0.9 }
-  });
-
-  map.addSource('samples-src', {
-    type: 'geojson',
-    data: {
-      type: 'FeatureCollection',
-      features: sampledPts.map(pt => ({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [pt.lon, pt.lat] },
-        properties: { elev: Math.round(pt.elev * 10) / 10 }
-      }))
-    }
-  });
-  map.addLayer({
-    id: 'samples', type: 'circle', source: 'samples-src',
-    paint: { 'circle-radius': 4, 'circle-color': '#f4a460', 'circle-stroke-color': '#0d0f14', 'circle-stroke-width': 1.5, 'circle-opacity': 0.9 }
-  });
-
-  map.on('mouseenter', 'samples', (e) => {
-    map.getCanvas().style.cursor = 'pointer';
-    const props = e.features[0].properties;
-    new maplibregl.Popup({ className: 'river-popup', closeButton: false })
-      .setLngLat(e.lngLat).setHTML(`Elev: <b>${props.elev} m</b>`).addTo(map);
-  });
-  map.on('mouseleave', 'samples', () => {
-    map.getCanvas().style.cursor = '';
+  map.on('mouseleave','samples',()=>{
+    map.getCanvas().style.cursor='';
     document.querySelectorAll('.maplibregl-popup').forEach(el=>el.remove());
   });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   LAYER TOGGLE PILLS
+   LAYER TOGGLES
 ═══════════════════════════════════════════════════════════════════════════ */
-const pillState = {};
-document.querySelectorAll('.pill').forEach(pill => {
-  const id = pill.dataset.layer;
-  pillState[id] = true;
-  pill.addEventListener('click', () => {
-    pillState[id] = !pillState[id];
-    pill.classList.toggle('active', pillState[id]);
-    if (!map) return;
-    const vis = pillState[id] ? 'visible' : 'none';
-    const layerMap = { 'rem-color': ['rem-color'], 'hillshade': ['hillshade'], 'river': ['river'], 'samples': ['samples'] };
-    (layerMap[id]||[]).forEach(lid => { if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis); });
+document.querySelectorAll('.ltog').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const id=btn.dataset.layer,isOn=btn.classList.toggle('on');
+    if(map&&map.getLayer(id))map.setLayoutProperty(id,'visibility',isOn?'visible':'none');
   });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    DOUBLE RANGE SLIDER
 ═══════════════════════════════════════════════════════════════════════════ */
-const sliderMin  = document.getElementById('rem-min');
-const sliderMax  = document.getElementById('rem-max');
-const sliderFill = document.getElementById('slider-fill');
-const SLIDER_LO = -10, SLIDER_HI = 20, SLIDER_RANGE = 30; // -10..+20
-
-function fmtBound(v) { return (v >= 0 ? '+' : '') + parseFloat(v).toFixed(1); }
-
-function updateSliderUI() {
-  const mn = parseFloat(sliderMin.value);
-  const mx = parseFloat(sliderMax.value);
-  const lo = ((mn - SLIDER_LO) / SLIDER_RANGE) * 100;
-  const hi = ((mx - SLIDER_LO) / SLIDER_RANGE) * 100;
-  sliderFill.style.left  = lo + '%';
-  sliderFill.style.width = Math.max(0, hi - lo) + '%';
-  document.getElementById('rem-min-lbl').textContent = fmtBound(mn);
-  document.getElementById('rem-max-lbl').textContent = fmtBound(mx);
-  document.getElementById('leg-min').textContent = fmtBound(mn) + ' m';
-  document.getElementById('leg-max').textContent = fmtBound(mx) + ' m';
-  updateLegendBar();
-  refreshRemLayer();
+const sliderMin=document.getElementById('rem-min'),sliderMax=document.getElementById('rem-max'),sliderFill=document.getElementById('slider-fill');
+const SLIDER_LO=-10,SLIDER_RANGE=30;
+function fmtBound(v){return(v>=0?'+':'')+parseFloat(v).toFixed(1);}
+function updateSliderUI(){
+  const mn=parseFloat(sliderMin.value),mx=parseFloat(sliderMax.value);
+  sliderFill.style.left=((mn-SLIDER_LO)/SLIDER_RANGE*100)+'%';
+  sliderFill.style.width=Math.max(0,(mx-mn)/SLIDER_RANGE*100)+'%';
+  document.getElementById('rem-min-lbl').textContent=fmtBound(mn);
+  document.getElementById('rem-max-lbl').textContent=fmtBound(mx);
+  document.getElementById('leg-min').textContent=fmtBound(mn)+' m';
+  document.getElementById('leg-max').textContent=fmtBound(mx)+' m';
+  updateLegendBar();applyColorToMap();
 }
-
-sliderMin.addEventListener('input', () => {
-  if (parseFloat(sliderMin.value) >= parseFloat(sliderMax.value))
-    sliderMin.value = (parseFloat(sliderMax.value) - 0.1).toFixed(1);
-  updateSliderUI();
-});
-sliderMax.addEventListener('input', () => {
-  if (parseFloat(sliderMax.value) <= parseFloat(sliderMin.value))
-    sliderMax.value = (parseFloat(sliderMin.value) + 0.1).toFixed(1);
-  updateSliderUI();
-});
+sliderMin.addEventListener('input',()=>{if(parseFloat(sliderMin.value)>=parseFloat(sliderMax.value))sliderMin.value=(parseFloat(sliderMax.value)-.1).toFixed(1);updateSliderUI();});
+sliderMax.addEventListener('input',()=>{if(parseFloat(sliderMax.value)<=parseFloat(sliderMin.value))sliderMax.value=(parseFloat(sliderMin.value)+.1).toFixed(1);updateSliderUI();});
 updateSliderUI();
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   OPACITY SLIDER
-═══════════════════════════════════════════════════════════════════════════ */
-document.getElementById('rem-opacity').addEventListener('input', function() {
-  const v = parseInt(this.value);
-  document.getElementById('rem-opacity-lbl').textContent = v + '%';
-  if (map && map.getLayer('rem-color'))
-    map.setPaintProperty('rem-color', 'raster-opacity', v / 100);
+document.getElementById('rem-opacity').addEventListener('input',function(){
+  const v=parseInt(this.value);document.getElementById('rem-opacity-lbl').textContent=v+'%';
+  if(map&&map.getLayer('rem-color'))map.setPaintProperty('rem-color','color-relief-opacity',v/100);
 });
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   COLORMAP SELECT → refresh
-═══════════════════════════════════════════════════════════════════════════ */
-document.getElementById('rem-cmap').addEventListener('change', () => {
-  updateLegendBar();
-  refreshRemLayer();
-});
-
-function updateLegendBar() {
-  const cmap = document.getElementById('rem-cmap').value;
-  document.getElementById('legend-bar').style.background = CMAP_CSS[cmap];
+document.getElementById('rem-cmap').addEventListener('change',()=>{updateLegendBar();applyColorToMap();});
+function updateLegendBar(){document.getElementById('legend-bar').style.background=CMAP_CSS[document.getElementById('rem-cmap').value];}
+function applyColorToMap(){
+  if(!map||!map.getLayer('rem-color'))return;
+  map.setPaintProperty('rem-color','color-relief-color',buildColorExpr(document.getElementById('rem-cmap').value,parseFloat(sliderMin.value),parseFloat(sliderMax.value)));
 }
 
-function refreshRemLayer() {
-  if (!map || !lastBbox || !map.getSource('rem-raster')) return;
-  tileCache.clear(); tileCacheCount = 0;
-  document.getElementById('s-tiles').textContent = 0;
-  const [s, w, n, e] = lastBbox;
-  const power = parseFloat(document.getElementById('p-power').value);
-  if (map.getLayer('rem-color')) map.removeLayer('rem-color');
-  if (map.getSource('rem-raster')) map.removeSource('rem-raster');
-  try { maplibregl.removeProtocol('remr'); } catch(e2) {}
-  registerRemRasterProtocol(power);
-  map.addSource('rem-raster', { type:'raster', tiles:['remr://tiles/{z}/{x}/{y}'], tileSize:256, bounds:[w,s,e,n], maxzoom:13 });
-  const opacity = parseInt(document.getElementById('rem-opacity').value) / 100;
-  map.addLayer({ id:'rem-color', type:'raster', source:'rem-raster', paint:{ 'raster-opacity': opacity, 'raster-resampling':'nearest' } });
+/* ═══════════════════════════════════════════════════════════════════════════
+   ZOOM AUTO
+═══════════════════════════════════════════════════════════════════════════ */
+const zoomAutoEl=document.getElementById('zoom-auto'),zoomInputEl=document.getElementById('p-zoom');
+zoomAutoEl.addEventListener('change',()=>{zoomInputEl.disabled=zoomAutoEl.checked;});
+function getDemZoom(){return zoomAutoEl.checked?Math.min(14,Math.floor(map.getZoom())+1):parseInt(zoomInputEl.value);}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GPU BADGE UPDATE
+═══════════════════════════════════════════════════════════════════════════ */
+function updateGpuBadge(){
+  const badge=document.getElementById('gpu-badge');
+  const toggle=document.getElementById('gpu-toggle');
+  if(!toggle.checked){badge.textContent='CPU';badge.className='gpu-badge';return;}
+  if(gpuAvailable){badge.textContent='WebGL2';badge.className='gpu-badge active';}
+  else{badge.textContent='no GPU';badge.className='gpu-badge fallback';}
 }
+document.getElementById('gpu-toggle').addEventListener('change',updateGpuBadge);
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MAIN PIPELINE
 ═══════════════════════════════════════════════════════════════════════════ */
-document.getElementById('btn-run').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-run');
-  btn.disabled = true;
-  logEl.innerHTML = '';
-  tileCache.clear(); tileCacheCount = 0;
-  imgCache.clear();
-  document.getElementById('stats').style.display = 'none';
+document.getElementById('btn-run').addEventListener('click',async()=>{
+  const btn=document.getElementById('btn-run');btn.disabled=true;
+  logEl.innerHTML='';tileCache.clear();tileCacheCount=0;imgCache.clear();
+  document.getElementById('stats').style.display='none';
 
-  // Always use current viewport
-  const bounds = map.getBounds();
-  const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
-  const bbox = [s, w, n, e]; // Overpass format
+  const bounds=map.getBounds();
+  const w=bounds.getWest(),s=bounds.getSouth(),e=bounds.getEast(),n=bounds.getNorth();
+  const bbox=[s,w,n,e];
+  const nSamples=parseInt(document.getElementById('p-samples').value);
+  const power=parseFloat(document.getElementById('p-power').value);
+  const demZoom=getDemZoom();
+  const useGpu=document.getElementById('gpu-toggle').checked&&gpuAvailable;
+  log(`Backend: ${useGpu?'WebGL2 GPU':'CPU'} · zoom ${demZoom}`,'done');
 
-  const nSamples = parseInt(document.getElementById('p-samples').value);
-  const power    = parseFloat(document.getElementById('p-power').value);
-  const demZoom  = parseInt(document.getElementById('p-zoom').value);
+  try{
+    const l1=log('Querying Overpass…');
+    const river=await fetchLongestRiver(bbox);
+    logUpdate(l1,`Found: "${river.name}" (${river.lengthKm.toFixed(1)} km)`,'done');
+    document.getElementById('s-name').textContent=river.name;
+    document.getElementById('s-len').textContent=river.lengthKm.toFixed(1);
+    setRiverSource(river.segments,river.name);
 
-  try {
-    // 1. Overpass
-    const l2 = log('Querying Overpass for waterways…');
-    const river = await fetchLongestRiver(bbox);
-    logUpdate(l2, `Found: "${river.name}" (${river.lengthKm.toFixed(1)} km, ${river.coords.length} nodes)`, 'done');
-    document.getElementById('s-name').textContent = river.name;
-    document.getElementById('s-len').textContent  = river.lengthKm.toFixed(1);
+    const l2=log(`Sampling ${nSamples} WSE points…`);
+    // Clip river to viewport before sampling — concentrates samples where tiles will be rendered
+    const viewSegs=clipSegmentsToViewport(river.orderedSegments,w,s,e,n);
+    const segsToSample=viewSegs.length>0?viewSegs:river.orderedSegments;
+    if(viewSegs.length===0)log('River not fully in viewport, using full river','running');
+    const samples=sampleRiverSegments(segsToSample,nSamples);
+    logUpdate(l2,`${samples.length} locations (viewport-clipped)`,'done');
 
-    // 2. Sample points
-    const l3 = log(`Sampling ${nSamples} points along river…`);
-    const samples = sampleRiverSegments(river.orderedSegments, nSamples);
-    logUpdate(l3, `${samples.length} sample locations computed`, 'done');
+    const l3=log(`Fetching elevations (zoom ${demZoom})…`);
+    const sampled=await sampleElevations(samples,demZoom);
+    riverPoints=sampled; // stored with .mx .my pre-projected
+    const elevs=sampled.map(p=>p.elev);
+    const eMin=Math.min(...elevs).toFixed(1),eMax=Math.max(...elevs).toFixed(1);
+    logUpdate(l3,`${sampled.length} WSE pts: ${eMin}–${eMax} m`,'done');
+    document.getElementById('s-elev').textContent=`${eMin} – ${eMax}`;
+    setSampleLayer(sampled);
 
-    // 3. Fetch elevations
-    const l4 = log(`Fetching DEM elevations (zoom ${demZoom})…`);
-    const sampled = await sampleElevations(samples, demZoom);
-    riverPoints = sampled;
-    const elevs = sampled.map(p => p.elev);
-    const elevMin = Math.min(...elevs).toFixed(1), elevMax = Math.max(...elevs).toFixed(1);
-    logUpdate(l4, `${sampled.length} elevations: ${elevMin}–${elevMax} m`, 'done');
-    document.getElementById('s-pts').textContent  = sampled.length;
-    document.getElementById('s-elev').textContent = `${elevMin} – ${elevMax}`;
+    if(useGpu)uploadPointsToGPU(sampled);
 
-    // 4. Register rem:// protocol (terrarium)
-    const l5 = log('Registering rem:// protocol…');
-    addREMProtocol(sampled, power);
-    logUpdate(l5, 'Protocol registered, tiles on demand + cached', 'done');
+    const l4=log('Building REM tiles…');
+    registerREMProtocol(sampled,power);
+    addREMLayersToMap([s,w,n,e]);
+    logUpdate(l4,`color-relief layer added (${useGpu?'GPU':'CPU'} IDW)`,'done');
 
-    // 5. Add map layers — do NOT fitBounds, keep current viewport
-    const l6 = log('Adding REM & river layers to map…');
-    addREMLayersToMap([s, w, n, e]);
-    addRiverLayers(river.segments, sampled, river.name);
-    logUpdate(l6, 'Layers added', 'done');
-
-    log('Pipeline complete ✓', 'done');
-    document.getElementById('stats').style.display = 'flex';
-
-  } catch(err) {
-    log(`Error: ${err.message}`, 'error');
-    console.error(err);
-  }
-
-  btn.disabled = false;
+    log('Pipeline complete ✓','done');
+    document.getElementById('stats').style.display='flex';
+  }catch(err){log(`Error: ${err.message}`,'error');console.error(err);}
+  btn.disabled=false;
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════════════════════════════════ */
-window.addEventListener('load', () => {
-  initMap([2.5, 43.65], 10); // default: Garonne area
+window.addEventListener('load',()=>{
+  initMap([2.5,43.65],10);
+  initGeocoder();
   updateLegendBar();
+  updateSliderUI();
+
+  // Try to initialise WebGL2 GPU context
+  try{
+    gpuAvailable=initWebGL2();
+  }catch(e){
+    console.warn('WebGL2 IDW init failed:',e);
+    gpuAvailable=false;
+  }
+  updateGpuBadge();
 });
 </script>
 </body>
