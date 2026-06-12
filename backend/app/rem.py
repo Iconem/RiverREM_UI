@@ -113,6 +113,15 @@ def make_rem_cog(
     _to_cog(rem_ras, out_cog_path, src_nodata=nodata)
     rem_min, rem_max = _percentiles(rem_ras, nodata=nodata)
 
+    # COG pixel dimensions (shown as metadata in the UI).
+    width = height = None
+    try:
+        _ds = gdal.Open(out_cog_path)
+        width, height = _ds.RasterXSize, _ds.RasterYSize
+        _ds = None
+    except Exception:
+        pass
+
     # publish the source DEM as a COG too, for optional client-side hillshade / DEM view
     dem_cog = out_cog_path.replace("_REM", "_DEM")
     dem_min = dem_max = None
@@ -132,4 +141,6 @@ def make_rem_cog(
         "river_name": None,
         "river_length_m": round(float(getattr(maker, "river_length", 0.0)), 1) or None,
         "dem_cog": dem_cog,
+        "width": width,
+        "height": height,
     }

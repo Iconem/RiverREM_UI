@@ -28,6 +28,8 @@ export type ComputeResponse = {
   river_name: string | null;
   river_length_m: number | null;
   centerline_url?: string | null;
+  width?: number | null;
+  height?: number | null;
   source_max_zoom?: number | null;
   dem_zoom?: number | null;
   requested_zoom?: number | null;

@@ -1,13 +1,18 @@
 name: riverrem
-# Traefik Git stack (builds both images on the Docker host from this repo — Portainer
-# CE needs no registry pull of your app images). TLS is terminated by your existing
-# Traefik via the external `traefik_proxy` network + leresolver. `web` (nginx) serves
-# the SPA and proxies the API/COGs to `api` on the internal network, same origin.
+# Public / production stack. Builds both images from this repo on the Docker host;
+# TLS is terminated by your existing Traefik via the external `traefik_proxy` network
+# (+ a cert resolver named `leresolver` — rename to match yours). `web` (nginx) serves
+# the SPA and same-origin-proxies the API/COGs to `api` on the internal network.
 #
-# Portainer stack env vars:
-#   DOMAIN        = rem.prod.heritagewatch.ai
-#   PUBLIC_BASE   = https://rem.prod.heritagewatch.ai   (builds COG + share URLs)
+# Set as stack env vars (Portainer) or a .env file (see .env.example):
+#   DOMAIN        = rem.example.com
+#   PUBLIC_BASE   = https://rem.example.com   (used to build COG + share URLs)
 #   VITE_API_BASE = (empty — same origin)
+#   GIT_SHA       = short commit hash shown in the footer (optional)
+#
+# Prefer prebuilt images instead of building on the host? Point `image:` at your
+# registry (e.g. ghcr.io/<org>/riverrem-api) and drop the `build:` blocks; CI in
+# .github/workflows/build-and-push.yml publishes them on push to main.
 
 services:
   api:
@@ -15,8 +20,9 @@ services:
     image: riverrem-api:latest
     container_name: riverrem-api
     environment:
-      PUBLIC_BASE: ${PUBLIC_BASE:-https://rem.prod.heritagewatch.ai}
+      PUBLIC_BASE: ${PUBLIC_BASE:-https://rem.example.com}
       DATA_DIR: /data
+      MAX_COGS: ${MAX_COGS:-200}
     volumes:
       - cogs:/data            # generated REM/DEM COGs persist here
     networks: [internal]
@@ -35,7 +41,7 @@ services:
     restart: unless-stopped
     labels:
       traefik.enable: "true"
-      traefik.http.routers.riverrem.rule: "Host(`${DOMAIN:-rem.prod.heritagewatch.ai}`)"
+      traefik.http.routers.riverrem.rule: "Host(`${DOMAIN:-rem.example.com}`)"
       traefik.http.routers.riverrem.entrypoints: websecure
       traefik.http.routers.riverrem.tls.certresolver: leresolver
       traefik.http.services.riverrem.loadbalancer.server.port: "80"

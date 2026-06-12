@@ -427,6 +427,15 @@ export function SidePanel(p: {
       <div className="space-y-3">
         <FoldHeader label="Utilities" folded={ui.foldUtil} onClick={() => setUi({ foldUtil: !ui.foldUtil })} />
         {!ui.foldUtil && (<>
+          {result && (
+            <div className="space-y-0.5 font-mono text-[10px] text-muted-foreground">
+              {result.width && result.height
+                ? <div>Image · {result.width} × {result.height} px</div>
+                : <div>Engine · client (live tiles)</div>}
+              <div>Altitude · {result.rem_min.toFixed(1)} – {result.rem_max.toFixed(1)} m above river</div>
+              {result.river_length_m ? <div>River · {(result.river_length_m / 1000).toFixed(1)} km</div> : null}
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <Label>Basemap</Label>
             <div className="w-44">
@@ -601,25 +610,27 @@ export function SidePanel(p: {
           <a className="underline" href="https://dancoecarto.com/creating-rems-in-qgis-the-idw-method" target="_blank" rel="noreferrer">Dan Coe — IDW</a>{" "}
           · automated by{" "}
           <a className="underline" href="https://opentopography.org/blog/new-package-automates-river-relative-elevation-model-rem-generation" target="_blank" rel="noreferrer">OpenTopography RiverREM</a>{" "}
-          (<a className="underline" href="https://github.com/OpenTopography/RiverREM" target="_blank" rel="noreferrer">repo</a>)
+          (<a className="underline" href="https://github.com/OpenTopography/RiverREM" target="_blank" rel="noreferrer">repo</a>).
+        </p>
+        <p>
+          <a className="underline" href="/rem-pure-frontend.html" target="_blank" rel="noreferrer">
+            Beta pure-client frontend GPU REM
+          </a>
         </p>
         <p>
           Made by{" "}
           <a className="underline" href="https://x.com/jo_chemla" target="_blank" rel="noreferrer">jo-chemla</a>
           {" · "}
           <a className="underline" href="https://iconem.com" target="_blank" rel="noreferrer">Iconem</a>
-        </p>
-        <p>
-          <a className="underline" href="/rem-pure-frontend.html" target="_blank" rel="noreferrer">
-            WIP — experimental pure-frontend / client-side JS River REM (MapLibre)
-          </a>
-        </p>
-        <p className="opacity-70">
-          build{" "}
-          {import.meta.env.VITE_GIT_SHA
-            ? <a className="underline" target="_blank" rel="noreferrer"
-                href={`https://github.com/jo-chemla/RiverREM_UI/commit/${import.meta.env.VITE_GIT_SHA}`}>{import.meta.env.VITE_GIT_SHA}</a>
-            : "dev"}
+          {(() => {
+            const sha = import.meta.env.VITE_GIT_SHA;
+            if (!sha || sha === "dev") return <span className="opacity-70">{" · build dev"}</span>;
+            return (<>
+              {" · build "}
+              <a className="underline" target="_blank" rel="noreferrer"
+                href={`https://github.com/iconem/RiverREM_UI/commit/${sha}`}>{sha.slice(0, 7)}</a>
+            </>);
+          })()}
         </p>
       </div>
     </Card>

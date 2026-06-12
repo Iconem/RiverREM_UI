@@ -216,6 +216,7 @@ def _run_compute(job_id: str, req: ComputeRequest):
             dem_min=meta.get("dem_min"), dem_max=meta.get("dem_max"),
             river_name=meta.get("river_name"), river_length_m=meta.get("river_length_m"),
             centerline_url=centerline_url,
+            width=meta.get("width"), height=meta.get("height"),
             source_max_zoom=dem_info.get("source_max_zoom"),
             dem_zoom=dem_info.get("dem_zoom"),
             requested_zoom=dem_info.get("requested_zoom"),

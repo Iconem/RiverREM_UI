@@ -1,273 +1,193 @@
 # River REM
 
-Generate a **River Relative Elevation Model** over the current map viewport and
-style it live in the browser — terrain tiles in, detrended-elevation COG out.
+Generate a **River Relative Elevation Model (REM)** over the current map viewport and
+style it live in the browser — terrain tiles in, detrended-elevation map out.
 
-![River REM over the Willamette near Corvallis](docs/screenshot.png)
+- **Server engine** — Python [OpenTopography/RiverREM](https://github.com/OpenTopography/RiverREM) on a FastAPI/GDAL backend.
+- **Client engine (beta)** — a pure-frontend JS/WebGL path that interpolates the water surface in the browser, no backend.
+
+![River REM over the Willamette near Corvallis](docs/screenshot.jpg)
 
 ---
 
-## What a River REM is (RiverREM, by OpenTopography)
+## What a REM is
 
-This app is a web front-end around **RiverREM**, the open-source REM generator from
-**OpenTopography** (Klar & Coe et al.): see [repo](https://github.com/OpenTopography/RiverREM)
-and blog [post](https://opentopography.org/blog/new-package-automates-river-relative-elevation-model-rem-generation)
-A REM re-references terrain elevation to the local **river water surface**, so the
-floodplain "flattens" and paleochannels, terraces, bars and meander scrolls pop out.
+A REM re-references terrain to the local **river water surface**, so the floodplain
+"flattens" and paleochannels, terraces, bars and meander scrolls pop out. The method is
+**Daniel Coe's** [IDW technique](https://dancoecarto.com/creating-rems-in-qgis-the-idw-method),
+automated by **RiverREM** (Klar & Coe et al., OpenTopography —
+[announcement](https://opentopography.org/blog/new-package-automates-river-relative-elevation-model-rem-generation)):
 
-The method originates with **Daniel Coe**, whose IDW technique and the visualizations
-that popularized REMs are documented [here](https://dancoecarto.com/creating-rems-in-qgis-the-idw-method). The core idea:
-sample the river's water-surface elevation along its centerline, **interpolate it
-across the whole DEM with inverse-distance weighting (IDW)**, then subtract that
-trend surface from the DEM. What's left is height-above-river, where a log-scaled or
-tight colour ramp turns centimetre-scale floodplain relief into vivid channel maps.
-RiverREM automates Dan Coe's QGIS workflow (centerline from OSM, IDW via KD-tree).
+1. **Centerline** — query OSM for named `waterway` ways in the view, keep the **longest** (or draw / import one).
+2. **Sample WSE** — read DEM elevation along the centerline (the river's water-surface elevation).
+3. **Interpolate** — spread WSE across the DEM with **inverse-distance weighting** (in EPSG:3857).
+4. **Detrend** — `REM = DEM - WSE`, i.e. metres above the river; colour it with a log-scaled / tight ramp.
 
-RiverREM's algorithm, in a few bullets (this is what runs on the backend):
+The REM is served as a single float band, so **all** colour logic (ramp, min/max, log,
+transparency) stays client-side and recolours instantly with no recompute.
 
-- **Find the centerline.** Query OpenStreetMap for `waterway` ways in the DEM bbox,
-  keep the *named* ones, group by name, and take the **longest** river by summed length.
-- **Sample the water surface.** Rasterize the centerline onto the DEM grid and read
-  DEM elevation at those pixels — that's the river's water-surface elevation (WSE).
-- **Interpolate WSE across the DEM.** KNN **inverse-distance weighting** (power 1) via
-  a KD-tree; `k` is auto-estimated from river **sinuosity** (more sinuous → larger `k`).
-- **Detrend.** `REM = DEM − interpolated_WSE`. The result is metres above the river.
-- (RiverREM can also bake a colour-relief × hillshade image; we deliberately **don't** —
-  see "design choices".)
+---
 
-![](https://object.cloud.sdsc.edu/v1/AUTH_opentopography/www/docs/REMBlogPost/detrend_example.png)
-Image source: OpenTopography, Removing the overall downward trend/component in river elevation.
+## Two engines
+
+| | **Server** (default) | **Client** (beta) |
+|---|---|---|
+| Where | FastAPI + GDAL + RiverREM | entirely in the browser |
+| DEM | Mapterhorn tiles -> UTM mosaic | Mapterhorn tiles, read per-tile |
+| IDW | RiverREM: **k-NN, power 1**, KD-tree, `k` from sinuosity (faithful) | **all sampled points**, power configurable (QGIS-style) |
+| Output | single-band float32 COG (EPSG:3857) | `rem://` terrarium tiles built live, per tile |
+| Strength | fidelity, full-res, exports | no backend, live recompute, fast |
+
+Both feed the **same** MapLibre `color-relief` layer, so every styling control works identically.
+
+### Client engine — how it works
+
+The tiled terrain source makes a backend optional. Once the river is queried and its WSE
+sampled, a custom MapLibre protocol `rem://{z}/{x}/{y}` fetches each Terrarium terrain tile
+on demand, runs IDW over the sampled points to get WSE, and emits the detrended
+`REM = DEM - WSE` **re-encoded as Terrarium** — so a standard `color-relief` layer can tint
+it. IDW runs on the CPU (or GPU, where it's a global all-points interpolation rather than
+k-nearest). The deepest available Mapterhorn zoom is probed per viewport and used as the
+source `maxzoom` so tiles past the source resolution aren't requested.
+
+A standalone single-file version lives at **`/rem-pure-frontend.html`** (no build step).
+
+> Note on fidelity: the server engine reproduces the **RiverREM package** (k-NN, power 1);
+> the client engine reproduces the **QGIS / Dan Coe** flavour (all-points, power ~2). Both
+> are valid — pick the engine for the contract you want.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────── BROWSER (Vite + React + MapLibre) ───────────────────────────┐
-│  • viewport, basemaps, draw, file import                                                 │
-│  • OSM centerline via Overpass (client-side, mirror-selectable)                          │
-│  • COG decode + colouring: geotiff.js + cpt2js ramps, independent min/max, log slider    │
-│  • nuqs: ALL state (view + every control) lives in the URL                               │
-└───────────────┬──────────────────────────────────────────────────────┬─────────────────┘
-                │ POST /compute   (bbox, zoom, centerline geojson)       │ GET cog tiles
-                ▼                                                        ▲ (HTTP range)
-┌─────────────────────────── BACKEND (FastAPI + GDAL + RiverREM) ─────────┴────────────────┐
-│  terrain.py    Mapterhorn XYZ tiles → decode RGB → mosaic (3857) → reproject UTM (metres) │
-│  centerline.py OSM longest-river replica · geojson/shapefile → merged centerline shp      │
-│  rem.py        REMMaker.make_rem() → warp EPSG:3857 → single-band float32 COG             │
-│  main.py       /compute · /cog/ingest · /centerline/osm · /upload · static COG serving    │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
++---------------- BROWSER (Vite + React + MapLibre) ----------------+
+| viewport - basemaps - draw/import - OSM centerline (Overpass/QLever)|
+| colour: color-relief + cpt ramps, independent min/max, log slider  |
+| client engine: rem:// terrarium tiles (per-tile IDW)               |
+| nuqs: all state (view + every control + active COG) lives in the URL|
++---------+-----------------------------------------+----------------+
+          | POST /compute (bbox, zoom, centerline)   | GET cog tiles (HTTP range)
+          v                                          ^
++---------------- BACKEND (FastAPI + GDAL + RiverREM) +--------------+
+| terrain.py   Mapterhorn tiles -> decode -> mosaic (3857) -> UTM    |
+| centerline.py  OSM longest-river - geojson/shapefile -> centerline |
+| rem.py   REMMaker.make_rem() -> warp 3857 -> single-band float COG |
+| main.py  /compute - /cog/ingest - /thumb - /upload - static COGs   |
++--------------------------------------------------------------------+
 ```
 
-### Why this split
+Why the split: RiverREM needs GDAL/scipy/OSM tooling, so the server engine fetches the DEM,
+samples the centerline and detrends on the backend, then serves a float COG the client
+recolours instantly. The client engine skips all of that and runs in the browser.
 
-- **RiverREM can't run in the browser** — it needs GDAL, scipy and OSM tooling. The DEM,
-  the centerline sampling and the detrend all happen **on the backend**.
-- The **terrain DTM is fetched and decoded on the backend** (not the client). The only
-  client-side use of Mapterhorn is the cosmetic *hillshade basemap* (`raster-dem` layer).
-- The REM is served as a **single float band** COG, so **all** colour logic (ramp, min/max,
-  log) stays client-side and recolours instantly — no recompute, no server round-trip.
-
----
-
-## Processing flow (per Compute)
-
-1. Browser sends the viewport `bbox`, `zoom`, resolution multiplier and a centerline.
-2. `terrain.py` fetches Mapterhorn tiles at `zoom + log2(multiplier)`, decodes terrarium
-   RGB → metres, mosaics in EPSG:3857, fills small gaps, reprojects to local **UTM**.
-3. The centerline (OSM / drawn / imported) is written to a shapefile; connected segments
-   are stitched with `linemerge` to avoid IDW seams at OSM way joins.
-4. `rem.py` runs `REMMaker.make_rem()` → raw REM (UTM, float32) → warp to EPSG:3857 →
-   GDAL **COG** (`-of COG`, internal overviews).
-5. Browser loads the COG via `@geomatico/maplibre-cog-protocol` as a **raster-dem**
-   source (`cog://…#dem`, terrarium-encoded) and tints it with a native MapLibre
-   **`color-relief`** layer. Ramp/min/max/reverse changes just update the paint
-   expression — instant GPU recolour, no recompute.
-
-### Payloads
-
-`POST /compute`
+### `POST /compute`
 ```json
 {
   "bbox": { "west": -123.33, "south": 44.54, "east": -123.17, "north": 44.60 },
-  "zoom": 13,
-  "resolution_multiplier": 1,
+  "zoom": 13, "resolution_multiplier": 1, "idw_power": 2,
   "centerline_mode": "geojson",
-  "centerline_geojson": { "type": "FeatureCollection", "features": [ /* LineStrings */ ] },
-  "upload_id": null
+  "centerline_geojson": { "type": "FeatureCollection", "features": [] },
+  "source_cog_url": null
 }
 ```
-→ `{ job_id, cog_url, bounds:[w,s,e,n], rem_min, rem_max, river_name, river_length_m }`
+-> `{ job_id, cog_url, dem_url, bounds:[w,s,e,n], rem_min, rem_max, width, height, river_name, river_length_m }`
 
-`POST /cog/ingest` → `{ "url": "https://…/dem.tif" }`
-→ `{ cog_url, bounds, rem_min, rem_max }` (reprojects any-CRS COG to a 3857 COG)
-
-`POST /centerline/osm` (legacy/fallback; the client now uses Overpass directly).
-`POST /upload` (zipped shapefile) → `{ upload_id }`.
-
-### Centerline modes
-
-- **OSM** — Overpass query in the browser (mirror selectable: overpass.de, kumi.systems,
-  private.coffee, osm.ch, qlever*). Replicates RiverREM's longest-named-river pick. The
-  resulting GeoJSON is previewed *and* sent, so the backend skips its own slow osmnx call.
-- **Draw** — hand-draw a LineString (terra-draw).
-- **File** — import `.geojson`/`.json` (parsed client-side) or a zipped `.shp` (backend).
-
-\* qlever speaks SPARQL, not Overpass QL — it's experimental and falls back if it fails.
+Other endpoints: `POST /cog/ingest` (reproject any-CRS COG to 3857), `POST /upload`
+(zipped shapefile -> `upload_id`), `POST /thumb` (store a run thumbnail), `POST /runs/prune`.
+`source_cog_url` lets RiverREM use your own elevation COG (read via GDAL `/vsicurl/`)
+instead of Mapterhorn.
 
 ---
 
-## Deploy (Docker Compose → Portainer + Traefik)
+## Run it
 
-Two services — **standard for a Python API + JS front-end**: `api` (FastAPI + GDAL +
-RiverREM) and `web` (the Vite build served by a tiny **nginx** that also same-origin
-proxies the API/COGs to `api`, like your kepler stack). **TLS is terminated by your
-existing Traefik** via the external `traefik_proxy` network + `leresolver` — the
-container does no TLS itself.
-
-```
-              Traefik (websecure, leresolver)
-                        |  Host(rem.prod.heritagewatch.ai)
-                  [ web ] nginx ── /  ───────────────► SPA (static)
-                        |         ── /cogs/* /compute* … ─► [ api ] FastAPI ─► volume: cogs
-                     (internal network)
-```
-
-Set DNS for the domain at the Traefik host and ensure the external `traefik_proxy`
-network exists. Stack env (Portainer → Environment variables, or `.env` — see
-`.env.example`):
-
-```
-DOMAIN=rem.prod.heritagewatch.ai
-PUBLIC_BASE=https://rem.prod.heritagewatch.ai
-VITE_API_BASE=
-```
-
-**Persistence:** COGs are written under `DATA_DIR=/data` into the named volume `cogs`,
-so they survive redeploys; a share link `…/?cog=https://rem.prod.heritagewatch.ai/cogs/<id>/rem_REM.tif&…`
-keeps working (permanent + same-origin). The `api` stays on an internal network
-(reachable only through nginx); only `web` carries Traefik labels.
-
-### Option A — build on the host (Git stack)
-
-Portainer → Stacks → *Add stack* → **Repository**, compose path `docker-compose.yml`.
-Portainer builds both images on the host, so **CE needs no registry pull of your app
-images** (only public base images: gdal, node, nginx).
-
-### Option B — pull prebuilt images from GHCR (image in the registry, not the repo)
-
-The cleaner "container out of the repo, only in Portainer" path:
-
-1. CI builds + pushes on every push to `main` — `.github/workflows/build-and-push.yml`
-   → `ghcr.io/<owner>/riverrem-api` and `…/riverrem-web`. Uses the built-in
-   `GITHUB_TOKEN`; no secrets to add. Make the GHCR packages private if you like.
-2. **Portainer → Registries → Add registry → Custom**: URL `ghcr.io`, username = your
-   GitHub user, password = a **PAT with `read:packages`** (only needed if private).
-3. Deploy `docker-compose.ghcr.yml` — as a Git stack, or just **paste it into
-   Portainer's web editor** (source no longer needs to be on the host). Set `OWNER`
-   (lowercase, e.g. `iconem`) and optionally `TAG`.
-
-**Image weight:** `web` is `nginx:1.29-alpine` (~50 MB) over the static build. `api`
-uses `ghcr.io/osgeo/gdal:ubuntu-small-3.8.4` — GDAL + the RiverREM stack
-(numpy/scipy/rasterio/shapely/osmnx) is inherently chunky; ubuntu-small with
-`--no-install-recommends`, `--no-cache-dir`, and a post-install `git` purge is the
-pragmatic lightest. (Alpine/musl GDAL is smaller but fights prebuilt wheels.)
-
----
-
-## Run it / develop
-
-### Dev commands (Windows cmd, hot reload)
-
-Backend — terminal 1:
+**Local / dev** (hot reload, API on :8000, Vite on :5173):
 ```
 cd backend
 docker build -t riverrem-api .
 docker run --rm -p 8000:8000 -e PUBLIC_BASE=http://localhost:8000 -v %cd%\data:/data riverrem-api
 ```
-That serves on :8000 and persists COGs in `backend\data`. For backend code
-hot-reload, mount the app and add `--reload`:
-```
-docker run --rm -p 8000:8000 -e PUBLIC_BASE=http://localhost:8000 -v %cd%\app:/srv/app -v %cd%\data:/data riverrem-api uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Frontend — terminal 2 (Vite HMR, instant):
 ```
 cd frontend
 pnpm install
 echo VITE_API_BASE=http://localhost:8000> .env.local
 pnpm dev
 ```
-Open http://localhost:5173 (HMR; API on :8000). Backend env overrides:
-`TERRAIN_TILE_URL`, `TERRAIN_ENCODING` (`terrarium`|`mapbox`), `TERRAIN_MAX_ZOOM`,
-`PUBLIC_BASE`, `DATA_DIR`.
 
-**Full-stack smoke test** (one command — exact prod build + the nginx same-origin
-proxy, no Traefik):
+**Full-stack smoke test** (prod build + nginx same-origin proxy, no Traefik):
 ```
 docker compose -f docker-compose.local.yml up --build
 ```
-Open http://localhost:8088 (override the port with `WEB_PORT=NNNN` if 8088 is taken).
+Open http://localhost:8088 (override with `WEB_PORT=NNNN`).
+
+Backend env: `TERRAIN_TILE_URL`, `TERRAIN_ENCODING` (`terrarium`|`mapbox`),
+`TERRAIN_MAX_ZOOM`, `PUBLIC_BASE`, `DATA_DIR`, `MAX_COGS`.
 
 ---
 
-## Styling controls
+## Deploy (Docker Compose -> Portainer + Traefik)
 
-- **Colour ramp** — cpt-style ramps with live gradient previews (mako_r, blues_r, a
-  black-and-white **gray** ramp first; plus viridis, spectral, topo, inferno, magma,
-  plasma, cividis, turbo, terrain, rdbu_r), and a **Reverse** toggle that flips any ramp.
-  `cptToStops()` imports arbitrary GMT `.cpt` palettes via cpt2js.
-- **Min / Max (m)** — independent. The **max slider** is logarithmic when "Log max slider"
-  is on: the slider position is an exponent and `max = 10^pos`, so you keep fine control at
-  a 1 m ceiling *and* a 100 m ceiling. Slider bounds auto-scale to ~2× the computed range.
-- **Basemaps** — Dark (CARTO/OSM), Satellite (Esri), or live **Hillshade** from Mapterhorn.
-- **Load COG** — any single-band float COG, any CRS: the backend opens it via `/vsicurl`,
-  reprojects to a 3857 overview COG, and the map fits to its true extent.
+Two services: `api` (FastAPI + GDAL + RiverREM, internal network) and `web` (the Vite build
+on a tiny **nginx** that same-origin-proxies the API/COGs to `api`). **TLS is terminated by
+your existing Traefik** via the external `traefik_proxy` network — the container does no TLS.
 
-## Exports, runs & sharing
+```
+              Traefik (websecure, cert resolver)
+                        |  Host(${DOMAIN})
+                  [ web ] nginx -- /  ------------> SPA (static)
+                        |         -- /cogs/* /compute ... -> [ api ] FastAPI -> volume: cogs
+                     (internal network)
+```
 
-- **Export** (after a compute): a **composite PNG** (the REM rendered through the current
-  ramp/min/max/reverse), the **raw REM COG** (float, georeferenced — the real deliverable),
-  the **source DEM COG**, and the **centerline GeoJSON**.
-- **Runs** — every compute/loaded COG is saved to browser `localStorage` (no auth). The Runs
-  list reloads any past REM as the active layer with its styling. Delete with the trash icon.
-- **Share link** — copies the current URL. nuqs keeps *everything* in the URL (view, all
-  controls, **and** the active COG reference + bounds), so a link reproduces the exact styled
-  REM on any machine — the COGs are public. (For real sharing, run the backend on a public
-  `PUBLIC_BASE`, not localhost.)
-- **Progress** — compute shows staged hints (terrain → centerline → detrend → COG → tiles)
-  with elapsed time. It's an indeterminate hint, not a true percentage (synchronous backend).
+Deploy `docker-compose.yml` as a Portainer Git stack (builds both images on the host — CE
+needs no registry for your app images). Set stack env (or `.env`, see `.env.example`):
+
+```
+DOMAIN=rem.example.com
+PUBLIC_BASE=https://rem.example.com
+VITE_API_BASE=
+```
+
+Persistence: COGs live in the `cogs` volume (capped by `MAX_COGS`, oldest evicted), so
+redeploys and share links keep working. The build commit hash can be shown in the footer by
+passing `--build-arg VITE_GIT_SHA=$(git rev-parse --short HEAD)` (CI passes it automatically;
+see `.github/workflows/build-and-push.yml`, which also publishes images to GHCR if you'd
+rather pull prebuilt — point the compose `image:` at your registry and drop the `build:` blocks).
+
+`api` uses `ghcr.io/osgeo/gdal:ubuntu-small-3.8.4`; `web` is `nginx:1.29-alpine` over the static build.
 
 ---
 
-## Design choices / things to verify
+## Controls
 
-- **Terrain source** defaults to Mapterhorn `https://tiles.mapterhorn.com/{z}/{x}/{y}.webp`,
-  512 px tiles, *terrarium* encoding (~4 mm vertical quantization — fine; the real limit is
-  source DEM horizontal resolution). The usable zoom is **probed per viewport** (deepest
-  existing centre tile, up to z20), so 2×/4× fetch genuinely higher-res tiles where they
-  exist; failed tiles are retried, and remaining gaps are filled. For a lidar-grade REM,
-  point `terrain.py` at a real DEM (**OpenTopography** / USGS 3DEP).
-- **REM colouring is GPU-native:** the geomatico COG protocol decodes the float COG
-  into a terrarium-encoded `raster-dem`, and a MapLibre **`color-relief`** layer applies
-  the ramp (built from the selected stops, remapped to the min/max). Recolour is a paint
-  update — instant, no re-fetch. NoData is encoded to a low sentinel and rendered
-  transparent via a floor stop. (Needs maplibre-gl ≥ 5.6; bumped from 4.7.)
-- **Sharpness / blockiness:** `color-relief` has **no** `raster-resampling` knob
-  (that's `raster`-layer only; linear resampling for color-relief/hillshade is the
-  open request maplibre-gl-js#7154). The REM source uses **512px tiles**, and an
-  **Oversample** control (1×/2×/4×) calls `map.setPixelRatio(factor × devicePixelRatio)`
-  (capped at 4) to supersample the GL canvas — the practical fix for blocky imported
-  COGs on 4K displays. The hard limit remains the source DEM's horizontal resolution.
-- **Progress** is real: `/compute` runs as a background job; a logging handler parses
-  RiverREM's interpolation `%` and phase lines, surfaced via `GET /compute/{job_id}`
-  polling. The UI advances ~20%/step and shows the true % during the slow KD-tree step.
-- Higher resolution multipliers need higher-zoom tiles; where the source has none, coverage
-  is checked and gaps are filled, else compute returns a clear message.
-- Not exhaustively run end-to-end across every CRS/area — treat as a working scaffold.
+- **Engine** — Server (RiverREM COG) or Client (live in-browser tiles); **IDW power** applies to both.
+- **Colour ramp** — cpt-style ramps with live previews (mako_r, blues_r, gray, viridis,
+  spectral, topo, inferno, magma, plasma, cividis, turbo, terrain, rdbu_r, set3), **Reverse**,
+  and `.cpt` import via cpt2js.
+- **Min / Max (m)** — independent, with a **log** slider and customisable slider bounds.
+- **Transparent** — fade the white or black end so a basemap shows through.
+- **Layer** — flip between REM and DEM (independent bounds each).
+- **Basemaps** — Dark / Light (CARTO), Satellite (Esri), opaque Hillshade (Mapterhorn), None.
+- **Resolution** (server) — 1x/2x/4x, probed against the deepest zoom Mapterhorn serves here.
+- **Runs** — every compute/loaded COG is saved to `localStorage` (server/client chip), reloadable
+  with its full styling; list or gallery view, rename/delete/duplicate, thumbnails.
+- **Export** — composite JPG, raw REM COG (the deliverable), source DEM COG, centerline GeoJSON.
+- **Share** — nuqs keeps everything in the URL (view + controls + active COG), so a link
+  reproduces the exact styled REM (COGs are public).
 
-## Scaling alternatives
+---
 
-`/compute` is synchronous; swap it for an enqueue + poll on **trigger.dev** (self-hosted)
-without touching the pipeline functions. For server-side OGC styling, front the COGs with
-**TiTiler** (XYZ/WMTS with on-the-fly `rescale` + `colormap`).
+## Future work
+
+`/compute` is synchronous; an enqueue + poll (e.g. self-hosted trigger.dev) would scale it
+without touching the pipeline. For server-side OGC styling, front the COGs with **TiTiler**.
+For the client engine, a WebGPU compute path (with a spatial grid for true k-NN) would bring
+GPU IDW to full fidelity.
+
+## Credits
+
+REM method: [Dan Coe - IDW](https://dancoecarto.com/creating-rems-in-qgis-the-idw-method),
+automated by [OpenTopography RiverREM](https://github.com/OpenTopography/RiverREM).
+Terrain (c) [Mapterhorn](https://mapterhorn.com). Made by [jo-chemla](https://x.com/jo_chemla) -
+[Iconem](https://iconem.com).
