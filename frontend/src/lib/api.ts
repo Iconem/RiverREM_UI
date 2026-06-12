@@ -10,6 +10,7 @@ export type ComputeRequest = {
   centerline_geojson?: GeoJSON.GeoJSON | null;
   upload_id?: string | null;
   source_cog_url?: string | null;
+  idw_power?: number;
   interp_pts?: number;
   k?: number | null;
   eps?: number;

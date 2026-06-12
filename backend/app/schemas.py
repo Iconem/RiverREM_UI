@@ -33,6 +33,10 @@ class ComputeRequest(BaseModel):
     # (read remotely via GDAL /vsicurl/). When set, the zoom machinery is bypassed.
     source_cog_url: Optional[str] = None
 
+    # IDW power for the river-surface interpolation (applied if the installed
+    # RiverREM exposes a power kwarg; otherwise parsed and ignored).
+    idw_power: float = Field(2.0, ge=0.5, le=4.0)
+
     # RiverREM knobs (mirror REMMaker kwargs).
     interp_pts: int = 1000
     k: Optional[int] = None

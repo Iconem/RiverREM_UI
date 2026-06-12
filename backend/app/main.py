@@ -180,7 +180,7 @@ def _run_compute(job_id: str, req: ComputeRequest):
         meta = make_rem_cog(
             dem_path, rem_cog, out_dir=job_dir,
             centerline_shp=centerline_shp,
-            interp_pts=req.interp_pts, k=req.k, eps=req.eps,
+            interp_pts=req.interp_pts, k=req.k, eps=req.eps, idw_power=req.idw_power,
         )
 
         rel = os.path.relpath(rem_cog, COG_DIR)

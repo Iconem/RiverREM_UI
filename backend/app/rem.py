@@ -18,6 +18,7 @@ from __future__ import annotations
 import numpy as np
 from osgeo import gdal
 
+import inspect
 from riverrem.REMMaker import REMMaker
 
 gdal.UseExceptions()
@@ -58,6 +59,21 @@ def _percentiles(path: str, nodata=None) -> tuple[float, float]:
     return float(lo), float(hi)
 
 
+def _remmaker_power_kwarg(power: float | None) -> dict:
+    """RiverREM versions differ on whether/what they call the IDW power kwarg.
+    Pass it only if REMMaker.__init__ actually accepts it (else parse-and-ignore)."""
+    if power is None:
+        return {}
+    try:
+        params = inspect.signature(REMMaker.__init__).parameters
+        for name in ("p", "power", "idw_power", "interp_power"):
+            if name in params:
+                return {name: power}
+    except Exception:
+        pass
+    return {}
+
+
 def make_rem_cog(
     dem_path: str,
     out_cog_path: str,
@@ -66,6 +82,7 @@ def make_rem_cog(
     interp_pts: int = 1000,
     k: int | None = None,
     eps: float = 0.1,
+    idw_power: float | None = None,
 ) -> dict:
     """Run RiverREM on `dem_path` and write a 3857 COG to `out_cog_path`.
 
@@ -79,6 +96,7 @@ def make_rem_cog(
         k=k,
         eps=eps,
         cache_dir=out_dir,
+        **_remmaker_power_kwarg(idw_power),
     )
     try:
         rem_ras = maker.make_rem()  # raw REM GeoTIFF (UTM, float32)

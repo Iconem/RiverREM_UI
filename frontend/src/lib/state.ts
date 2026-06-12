@@ -17,7 +17,7 @@ export const RAMP_NAMES = [
   "mako_r", "blues_r", "gray", "viridis", "spectral", "topo",
   "inferno", "magma", "plasma", "cividis", "turbo", "terrain", "rdbu_r", "set3",
 ] as const;
-export const BASEMAPS = ["dark", "satellite", "hillshade", "none"] as const;
+export const BASEMAPS = ["dark", "light", "satellite", "hillshade", "none"] as const;
 
 export function useMapView() {
   return useQueryStates({
@@ -33,7 +33,7 @@ export function useRemOptions() {
   return useQueryStates({
     mode: parseAsStringEnum(["osm", "geojson", "shapefile"]).withDefault("osm"),
     engine: parseAsStringEnum(["server", "client"]).withDefault("server"), // server=RiverREM COG, client=pure-JS live tiles
-    power: parseAsFloat.withDefault(1), // IDW power (client engine)
+    power: parseAsFloat.withDefault(2), // IDW power (both engines)
     samples: parseAsInteger.withDefault(150), // river WSE sample count (client engine)
     base: parseAsStringEnum([...BASEMAPS]).withDefault("dark"),
     ramp: parseAsStringEnum([...RAMP_NAMES]).withDefault("mako_r"),

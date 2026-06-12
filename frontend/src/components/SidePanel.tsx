@@ -22,7 +22,7 @@ import type { ComputeResponse, GeoHit } from "@/lib/api";
 type Opts = {
   mode: "osm" | "geojson" | "shapefile";
   engine: "server" | "client"; power: number; samples: number;
-  base: "dark" | "satellite" | "hillshade" | "none";
+  base: "dark" | "light" | "satellite" | "hillshade" | "none";
   ramp: (typeof RAMP_NAMES)[number];
   reverse: boolean; transparent: "none" | "white" | "black"; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; sliderLo: number | null; sliderHi: number | null; osm: string;
 };
@@ -90,6 +90,13 @@ export function SidePanel(p: {
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [geoQ, setGeoQ] = useState("");
+  // Min/Max use local text state so partial input like "-" or "-12." is typable;
+  // committed (parsed + clamped) on blur / Enter. type="number" + parseFloat would
+  // reject the intermediate "-" and wipe the field.
+  const [minStr, setMinStr] = useState("");
+  const [maxStr, setMaxStr] = useState("");
+  useEffect(() => { setMinStr(String(opts.min)); }, [opts.min]);
+  useEffect(() => { setMaxStr(String(opts.max)); }, [opts.max]);
 
   // Slider bounds span the active layer's data range AND the current selection.
   // REM is clamped to a -10 m floor (it can dip slightly below the river but not
@@ -197,15 +204,18 @@ export function SidePanel(p: {
             </>
           )}
           {opts.mode === "geojson" && (
-            <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">Click on the map to draw a centerline. Double-click to finish.</p>
+            <>
+              <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">Click on the map to draw a centerline. Double-click to finish, or upload a file.</p>
+              <Button variant="outline" size="sm" className="w-full" onClick={() => fileRef.current?.click()}>Upload .geojson</Button>
+            </>
           )}
           {opts.mode === "shapefile" && (
             <>
-              <Button variant="outline" size="sm" className="w-full" onClick={() => fileRef.current?.click()}>Upload .geojson / .shp (zip)</Button>
-              <input ref={fileRef} type="file" accept=".geojson,.json,.zip,.shp" className="hidden"
-                onChange={(e) => e.target.files?.[0] && p.onUpload(e.target.files[0])} />
+              <Button variant="outline" size="sm" className="w-full" onClick={() => fileRef.current?.click()}>Upload shapefile (.zip) or .geojson</Button>
             </>
           )}
+          <input ref={fileRef} type="file" accept=".geojson,.json,.zip,.shp" className="hidden"
+            onChange={(e) => e.target.files?.[0] && p.onUpload(e.target.files[0])} />
           {p.previewInfo && (
             <p className="font-mono text-[10px] text-muted-foreground">{p.previewInfo.river_name} · {(p.previewInfo.river_length_m / 1000).toFixed(1)} km</p>
           )}
@@ -225,36 +235,38 @@ export function SidePanel(p: {
         </Tabs>
       </div>
 
-      {opts.engine === "client" ? (
-        <>
-          <p className="font-mono text-[10px] leading-snug text-muted-foreground">
-            Experimental — REM is sampled &amp; built live in your browser (Mapterhorn DEM, IDW), no server compute.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label>IDW power</Label>
-              <Input type="number" step="0.5" min="0.5" max="3" value={opts.power}
-                onChange={(e) => setOpts({ power: Math.max(0.5, Math.min(3, parseFloat(e.target.value) || 1)) })} />
-            </div>
-            <div className="space-y-1">
-              <Label>River samples</Label>
-              <Input type="number" step="10" min="8" max="600" value={opts.samples}
-                onChange={(e) => setOpts({ samples: Math.max(8, Math.min(600, parseInt(e.target.value) || 150)) })} />
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label>Resolution</Label>
-            <Tabs value={String(opts.res)} onValueChange={(v) => setOpts({ res: Number(v) })}>
-              <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-3">{r}×</TabsTrigger>)}</TabsList>
-            </Tabs>
-          </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label>IDW power</Label>
+          <Input type="number" step="0.5" min="0.5" max="4" value={opts.power}
+            onChange={(e) => setOpts({ power: Math.max(0.5, Math.min(4, parseFloat(e.target.value) || 2)) })} />
+        </div>
+        {opts.engine === "client" ? (
           <div className="space-y-1">
-            <Label>DEM COG URL (optional)</Label>
-            <Input value={p.demCogUrl} onChange={(e) => p.setDemCogUrl(e.target.value)} placeholder="https://…/dem.tif — overrides Mapterhorn" />
+            <Label>River samples</Label>
+            <Input type="number" step="10" min="10" max="1000" value={opts.samples}
+              onChange={(e) => setOpts({ samples: Math.max(10, Math.min(1000, parseInt(e.target.value) || 150)) })} />
           </div>
+        ) : (
+          <div className="flex flex-col justify-end">
+            <div className="flex items-center justify-between">
+              <Label>Resolution</Label>
+              <Tabs value={String(opts.res)} onValueChange={(v) => setOpts({ res: Number(v) })}>
+                <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-2">{r}×</TabsTrigger>)}</TabsList>
+              </Tabs>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {opts.engine === "client" ? (
+        <p className="font-mono text-[10px] leading-snug text-muted-foreground">
+          Experimental — REM is sampled &amp; built live in your browser (Mapterhorn DEM, IDW), no server compute.
+        </p>
+      ) : (
+        <div className="space-y-1">
+          <Label>DEM COG URL (optional)</Label>
+          <Input value={p.demCogUrl} onChange={(e) => p.setDemCogUrl(e.target.value)} placeholder="https://…/dem.tif — overrides Mapterhorn" />
         </div>
       )}
 
@@ -329,13 +341,19 @@ export function SidePanel(p: {
               <div className="flex items-center gap-1">
                 <button onClick={() => setOpts({ sliderLo: opts.min })} title="Set slider min bound to this value"
                   aria-label="set slider min bound" className="shrink-0 text-muted-foreground hover:text-foreground"><Save className="h-3.5 w-3.5" /></button>
-                <Input type="number" step="0.1" value={opts.min} onChange={(e) => setOpts({ min: Math.max(isDem ? -Infinity : REM_FLOOR, Math.min(parseFloat(e.target.value), opts.max - 0.1)) })} />
+                <Input type="text" inputMode="decimal" value={minStr}
+                  onChange={(e) => setMinStr(e.target.value)}
+                  onBlur={() => { const v = parseFloat(minStr); if (Number.isFinite(v)) setOpts({ min: Math.max(isDem ? -1e9 : REM_FLOOR, Math.min(v, opts.max - 0.1)) }); else setMinStr(String(opts.min)); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
               </div>
             </div>
             <div className="space-y-1">
               <Label>Max (m)</Label>
               <div className="flex items-center gap-1">
-                <Input type="number" step="0.1" value={opts.max} onChange={(e) => setOpts({ max: Math.max(parseFloat(e.target.value), opts.min + 0.1) })} />
+                <Input type="text" inputMode="decimal" value={maxStr}
+                  onChange={(e) => setMaxStr(e.target.value)}
+                  onBlur={() => { const v = parseFloat(maxStr); if (Number.isFinite(v)) setOpts({ max: Math.max(v, opts.min + 0.1) }); else setMaxStr(String(opts.max)); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
                 <button onClick={() => setOpts({ sliderHi: opts.max })} title="Set slider max bound to this value"
                   aria-label="set slider max bound" className="shrink-0 text-muted-foreground hover:text-foreground"><Save className="h-3.5 w-3.5" /></button>
               </div>
@@ -416,6 +434,7 @@ export function SidePanel(p: {
                 <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="dark">Dark (OSM)</SelectItem>
+                  <SelectItem value="light">Light (OSM)</SelectItem>
                   <SelectItem value="satellite">Satellite (Esri)</SelectItem>
                   <SelectItem value="hillshade">Hillshade (Mapterhorn)</SelectItem>
                   <SelectItem value="none">None</SelectItem>
@@ -484,7 +503,7 @@ export function SidePanel(p: {
                   const active = r.id === p.activeRunId;
                   return (
                     <div key={r.id} className={`overflow-hidden rounded-md border ${active ? "border-foreground/40" : "border-border"}`}>
-                      <button className="block w-full" onClick={() => p.onLoadRun(r)} aria-label="load run">
+                      <button className="relative block w-full" onClick={() => p.onLoadRun(r)} aria-label="load run">
                         {r.thumb ? (
                           <img src={r.thumb} alt="" className="h-24 w-full object-cover" />
                         ) : (
@@ -492,6 +511,9 @@ export function SidePanel(p: {
                             <ImageOff className="h-5 w-5 text-muted-foreground" />
                           </div>
                         )}
+                        <span className={`absolute right-1 top-1 rounded px-1 py-0.5 font-mono text-[8px] uppercase tracking-wide ${r.engine === "client" ? "bg-amber-500/85 text-black" : "bg-sky-600/85 text-white"}`}>
+                          {r.engine === "client" ? "client" : "server"}
+                        </span>
                       </button>
                       <div className="flex items-center gap-1.5 px-2 py-1">
                         {active && (
@@ -543,7 +565,12 @@ export function SidePanel(p: {
                       ) : (
                         <button className="min-w-0 flex-1 text-left" onClick={() => p.onLoadRun(r)}>
                           <div className="truncate font-mono text-[11px]">{r.name || r.id.slice(0, 8)}</div>
-                          <div className="font-mono text-[9px] text-muted-foreground">{new Date(r.ts).toLocaleString()} · {r.min}–{r.max} m</div>
+                          <div className="flex items-center gap-1 font-mono text-[9px] text-muted-foreground">
+                            <span className={`rounded px-1 uppercase ${r.engine === "client" ? "bg-amber-500/20 text-amber-700 dark:text-amber-400" : "bg-sky-600/20 text-sky-700 dark:text-sky-400"}`}>
+                              {r.engine === "client" ? "client" : "server"}
+                            </span>
+                            <span>{new Date(r.ts).toLocaleString()} · {r.min}–{r.max} m</span>
+                          </div>
                         </button>
                       )}
                       {editId === r.id ? (

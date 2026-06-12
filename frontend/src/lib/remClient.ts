@@ -176,6 +176,35 @@ export function clearRemCache() {
   tileCache.clear();
 }
 
+// Cache of probed deepest-available zoom, keyed by coarse lon/lat.
+const zoomProbeCache = new Map<string, number>();
+
+/**
+ * Find the deepest Mapterhorn zoom whose centre tile actually exists, by probing
+ * top-down (z`ceiling`→1). Avoids requesting 404 tiles in the client engine.
+ */
+export async function probeMaxZoom(lon: number, lat: number, ceiling = 18): Promise<number> {
+  const key = `${lon.toFixed(2)},${lat.toFixed(2)},${ceiling}`;
+  const hit = zoomProbeCache.get(key);
+  if (hit !== undefined) return hit;
+  const exists = (z: number) =>
+    new Promise<boolean>((res) => {
+      const x = lon2tile(lon, z), y = lat2tile(lat, z);
+      const i = new Image();
+      i.crossOrigin = "anonymous";
+      i.onload = () => res(true);
+      i.onerror = () => res(false);
+      i.src = MAPTERHORN.replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y));
+    });
+  let found = 12;
+  for (let z = ceiling; z >= 1; z--) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await exists(z)) { found = z; break; }
+  }
+  zoomProbeCache.set(key, found);
+  return found;
+}
+
 type LngLat = [number, number];
 
 function extractLines(geojson: GeoJSON.GeoJSON | null): LngLat[][] {

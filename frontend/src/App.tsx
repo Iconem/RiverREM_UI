@@ -5,7 +5,7 @@ import { SidePanel } from "@/components/SidePanel";
 import { useMapView, useRemOptions, useActiveRem, useUiState } from "@/lib/state";
 import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit } from "@/lib/api";
 import { fetchLongestRiver, mergeFeatureCollection } from "@/lib/osm";
-import { sampleRiverPoints, setRemParams, packPts, unpackPts, type RiverPoint } from "@/lib/remClient";
+import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, type RiverPoint } from "@/lib/remClient";
 import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
 
 function download(blob: Blob, name: string) {
@@ -73,6 +73,7 @@ export default function App() {
   const [riverPoints, setRiverPoints] = useState<RiverPoint[] | null>(null); // client engine WSE points
   const [remToken, setRemToken] = useState(0); // bump to force the client rem:// source to rebuild
   const [demCogUrl, setDemCogUrl] = useState(""); // optional DEM COG for the server engine
+  const [clientMaxZoom, setClientMaxZoom] = useState(14); // probed deepest Mapterhorn zoom (client engine)
 
   const bboxRef = useRef<{ bbox: BBox; zoom: number } | null>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -210,11 +211,13 @@ export default function App() {
     try {
       if (/\.(geojson|json)$/i.test(f.name)) {
         setCenterline(mergeFeatureCollection(JSON.parse(await f.text())));
-        setUploadId(null); setCenterInfo(null);
-      } else { const r = await api.upload(f); setUploadId(r.upload_id); setCenterline(null); }
+        setUploadId(null); setCenterInfo(null); setOpts({ mode: "geojson" });
+      } else {
+        const r = await api.upload(f); setUploadId(r.upload_id); setCenterline(null); setOpts({ mode: "shapefile" });
+      }
     } catch (e) { alert(`Import failed: ${(e as Error).message}`); }
     finally { setBusy(false); }
-  }, []);
+  }, [setOpts]);
 
   const recordRun = useCallback(async (res: ComputeResponse, remB: Bounds, demB: Bounds | null) => {
     setActiveRem({ cog: res.cog_url, dem: res.dem_url || "", bounds: res.bounds });
@@ -278,8 +281,12 @@ export default function App() {
         }
         setPhase("Sampling river"); setPct(45);
         const z = bboxRef.current.zoom;
-        const demZoom = Math.min(14, Math.max(10, Math.round(z) + 1));
-        const pts = await sampleRiverPoints(cl, demZoom, Math.max(8, opts.samples));
+        const cx = (bboxRef.current.bbox.west + bboxRef.current.bbox.east) / 2;
+        const cy = (bboxRef.current.bbox.south + bboxRef.current.bbox.north) / 2;
+        const maxZ = await probeMaxZoom(cx, cy);
+        setClientMaxZoom(maxZ);
+        const demZoom = Math.min(maxZ, Math.max(10, Math.round(z) + 1));
+        const pts = await sampleRiverPoints(cl, demZoom, Math.max(10, Math.min(1000, opts.samples)));
         if (pts.length === 0) throw new Error("No river elevations sampled in view");
         setPhase("Building tiles"); setPct(80);
         setRiverPoints(pts); setRemParams(pts, opts.power); setRemToken((n) => n + 1);
@@ -317,6 +324,7 @@ export default function App() {
           centerline_mode: usingShp ? "shapefile" : "geojson",
           centerline_geojson: usingShp ? null : cl, upload_id: usingShp ? uploadId : null,
           source_cog_url: demCogUrl.trim() || null,
+          idw_power: opts.power,
         },
         (ph, p) => { setPhase(ph); setPct(displayPct(ph, p)); }
       );
@@ -363,7 +371,9 @@ export default function App() {
     // Client runs: re-seed the sampled points so the rem:// source rebuilds offline.
     if (r.engine === "client" && r.clientPts?.length) {
       const pts = unpackPts(r.clientPts);
-      setRiverPoints(pts); setRemParams(pts, r.power ?? 1); setRemToken((n) => n + 1);
+      setRiverPoints(pts); setRemParams(pts, r.power ?? 2); setRemToken((n) => n + 1);
+      const [w, s, e, n] = r.bounds;
+      probeMaxZoom((w + e) / 2, (s + n) / 2).then(setClientMaxZoom);
     }
     setOpts({
       ramp: r.ramp as any, reverse: !!r.reverse, transparent: (r.transparent ?? "none") as any,
@@ -486,6 +496,7 @@ export default function App() {
         engine={opts.engine}
         riverPoints={riverPoints}
         idwPower={opts.power}
+        clientMaxZoom={clientMaxZoom}
         remToken={remToken}
         remVisible={remVisible}
         pickMode={pickMode}

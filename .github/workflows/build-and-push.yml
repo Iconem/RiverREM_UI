@@ -43,6 +43,7 @@ jobs:
           # web takes VITE_API_BASE="" (same origin); api ignores it
           build-args: |
             VITE_API_BASE=
+            VITE_GIT_SHA=${{ github.sha }}
           tags: |
             ghcr.io/${{ steps.meta.outputs.owner }}/riverrem-${{ matrix.name }}:latest
             ghcr.io/${{ steps.meta.outputs.owner }}/riverrem-${{ matrix.name }}:${{ github.sha }}

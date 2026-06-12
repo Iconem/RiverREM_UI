@@ -69,14 +69,21 @@ export function colorReliefExpr(name: string, min: number, max: number, reverse 
   // Per-stop alpha: optionally fade out the white (or black) end so an RGB
   // satellite basemap shows through the lightest/darkest relief.
   const alphaOf = (r: number, g: number, b: number): number => {
-    // Only the extreme end fades: full opacity until the colour is close to
-    // white/black, then a quick ramp to transparent over the last ~30%.
-    const ramp = (closeness: number) => {
-      const t = Math.max(0, (closeness - 0.9) / 0.1); // 0 below 0.9, →1 at 1.0
+    // WHITE mode: restrictive — only near-white fades (good over satellite).
+    if (transparent === "white") {
+      const whiteness = Math.min(r, g, b) / 255;
+      const t = Math.max(0, (whiteness - 0.9) / 0.1);
       return Math.round(255 * (1 - t));
-    };
-    if (transparent === "white") return ramp(Math.min(r, g, b) / 255); // whiteness
-    if (transparent === "black") return ramp(1 - Math.max(r, g, b) / 255); // blackness
+    }
+    // BLACK mode: fade the whole dark end smoothly (smoothstep) so dark/high-REM
+    // areas progressively disappear with NO hard alpha border. Starts at 0.55
+    // blackness, reaches fully transparent near pure black.
+    if (transparent === "black") {
+      const blackness = 1 - Math.max(r, g, b) / 255;
+      const t = Math.max(0, Math.min(1, (blackness - 0.55) / 0.4));
+      const s = t * t * (3 - 2 * t); // smoothstep — avoids the visible edge
+      return Math.round(255 * (1 - s));
+    }
     return 255;
   };
   const css = (r: number, g: number, b: number) => `rgba(${r},${g},${b},${(alphaOf(r, g, b) / 255).toFixed(3)})`;

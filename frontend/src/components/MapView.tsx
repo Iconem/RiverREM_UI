@@ -43,6 +43,11 @@ const STYLE: StyleSpecification = {
       tiles: ["https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png"],
       tileSize: 256, attribution: "© OpenStreetMap © CARTO",
     },
+    "carto-light": {
+      type: "raster",
+      tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"],
+      tileSize: 256, attribution: "© OpenStreetMap © CARTO",
+    },
     "esri-sat": {
       type: "raster",
       tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
@@ -56,24 +61,34 @@ const STYLE: StyleSpecification = {
   layers: [
     { id: "bg", type: "background", paint: { "background-color": "#0a0a0a" } },
     { id: "carto-dark", type: "raster", source: "carto-dark", layout: { visibility: "visible" } },
+    { id: "carto-light", type: "raster", source: "carto-light", layout: { visibility: "none" } },
     { id: "esri-sat", type: "raster", source: "esri-sat", layout: { visibility: "none" } },
+    // Opaque hillshade BASEMAP: neutral grey fill under a native MapLibre hillshade
+    // with opaque shadow/highlight colours, so relief reads as a standalone map.
+    { id: "hs-bg", type: "background", layout: { visibility: "none" }, paint: { "background-color": "#9aa0a6" } },
     {
       id: "mapterhorn-hillshade", type: "hillshade", source: "mapterhorn-dem",
       layout: { visibility: "none" },
-      paint: { "hillshade-shadow-color": "#000000", "hillshade-exaggeration": 0.6 },
+      paint: {
+        "hillshade-shadow-color": "#2b2f33",
+        "hillshade-highlight-color": "#ffffff",
+        "hillshade-accent-color": "#5a6066",
+        "hillshade-exaggeration": 0.7,
+      },
     },
   ],
 };
 
 const BASE_LAYERS: Record<string, string[]> = {
-  dark: ["carto-dark"], satellite: ["esri-sat"], hillshade: ["mapterhorn-hillshade"],
+  dark: ["carto-dark"], light: ["carto-light"], satellite: ["esri-sat"],
+  hillshade: ["hs-bg", "mapterhorn-hillshade"],
 };
 
 type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number; hillshade: string; transparent: "none" | "white" | "black" };
 
 export function MapView({
   initialView, opts, cogUrl, cogBounds, fitSignal, theme, preview, remVisible, pickMode,
-  engine, riverPoints, idwPower, remToken,
+  engine, riverPoints, idwPower, clientMaxZoom, remToken,
   onBounds, onView, onDrawn, onMapReady, onPick,
 }: {
   initialView: { lng: number; lat: number; zoom: number };
@@ -86,6 +101,7 @@ export function MapView({
   engine: "server" | "client";
   riverPoints: RiverPoint[] | null;
   idwPower: number;
+  clientMaxZoom: number;
   remToken: number;
   remVisible: boolean;
   pickMode: boolean;
@@ -134,7 +150,7 @@ export function MapView({
         tileSize: 256,
         encoding: "terrarium",
         bounds: cogBounds ?? undefined,
-        maxzoom: 14,
+        maxzoom: clientMaxZoom,
       } as any);
     } else {
       if (!cogUrl) return;
@@ -159,7 +175,7 @@ export function MapView({
     } as any);
     remRef.current = { src, layer };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, cogUrl, remToken, ready]);
+  }, [engine, cogUrl, remToken, clientMaxZoom, ready]);
 
   // Fit the camera to the COG only on an explicit signal (run load / compute
   // complete) — never on a plain REM/DEM layer toggle, which also changes cogUrl.
