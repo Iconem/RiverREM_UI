@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Upload, Pencil, Waves, Play, Loader2, Download, Share2, Layers, Trash2, FileDown,
   Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, ChevronRight, Crosshair, ExternalLink,
-  List, LayoutGrid, ImageOff, Camera, Save, Sun, Moon,
+  List, LayoutGrid, ImageOff, Camera, Save, Sun, Moon, Info,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -69,7 +69,7 @@ export function SidePanel(p: {
   result: ComputeResponse | null; hasCenterline: boolean;
   layer: "rem" | "dem"; hasDem: boolean; onSetLayer: (l: "rem" | "dem") => void;
   previewInfo: { river_name: string; river_length_m: number } | null;
-  runs: Run[]; activeRunId: string | null; remVisible: boolean; pickMode: boolean;
+  runs: Run[]; serverRuns: Run[]; activeRunId: string | null; remVisible: boolean; pickMode: boolean;
   pick: { lng: number; lat: number; rem: number | null; dem: number | null } | null;
   geoHits: GeoHit[];
   onPreview: () => void; onCompute: () => void; onUpload: (f: File) => void; onLoadCog: (url: string) => void;
@@ -195,7 +195,14 @@ export function SidePanel(p: {
                   <Select value={opts.osm} onValueChange={(v) => setOpts({ osm: v })}>
                     <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {OVERPASS_PRESETS.map((o) => <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>)}
+                      {OVERPASS_PRESETS.filter((o) => o.url.includes("qlever")).map((o) => (
+                        <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>
+                      ))}
+                      <div className="my-1 border-t border-border" />
+                      <div className="px-2 pb-1 pt-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">Overpass</div>
+                      {OVERPASS_PRESETS.filter((o) => !o.url.includes("qlever")).map((o) => (
+                        <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -237,7 +244,13 @@ export function SidePanel(p: {
 
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
-          <Label>IDW power</Label>
+          <div className="flex items-center gap-1">
+            <Label>IDW power</Label>
+            <span title="Inverse-distance weighting exponent. OpenTopography/RiverREM uses 1; Dan Coe's original QGIS method uses 2. Higher = more local (closer samples dominate)."
+              className="inline-flex cursor-help" aria-label="IDW power help">
+              <Info className="h-3 w-3 text-muted-foreground" />
+            </span>
+          </div>
           <Input type="number" step="0.5" min="0.5" max="4" value={opts.power}
             onChange={(e) => setOpts({ power: Math.max(0.5, Math.min(4, parseFloat(e.target.value) || 2)) })} />
         </div>
@@ -403,8 +416,10 @@ export function SidePanel(p: {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" size="sm" onClick={p.onExportComposite}><Download className="mr-1 h-3 w-3" />Composite JPG</Button>
-              <Button variant="outline" size="sm" onClick={p.onExportRaw}><FileDown className="mr-1 h-3 w-3" />REM COG</Button>
-              <Button variant="outline" size="sm" onClick={p.onExportDem} disabled={!result.dem_url}><FileDown className="mr-1 h-3 w-3" />DEM COG</Button>
+              <Button variant="outline" size="sm" onClick={p.onExportRaw} disabled={opts.engine === "client"}
+                title={opts.engine === "client" ? "COGs can only be exported for server runs" : undefined}><FileDown className="mr-1 h-3 w-3" />REM COG</Button>
+              <Button variant="outline" size="sm" onClick={p.onExportDem} disabled={opts.engine === "client" || !result.dem_url}
+                title={opts.engine === "client" ? "COGs can only be exported for server runs" : undefined}><FileDown className="mr-1 h-3 w-3" />DEM COG</Button>
               <Button variant="outline" size="sm" onClick={p.onExportCenterline} disabled={!p.hasCenterline}><FileDown className="mr-1 h-3 w-3" />Centerline</Button>
             </div>
             <Button variant="ghost" size="sm" className="h-7 w-full gap-1 text-xs"
@@ -429,10 +444,11 @@ export function SidePanel(p: {
         {!ui.foldUtil && (<>
           {result && (
             <div className="space-y-0.5 font-mono text-[10px] text-muted-foreground">
-              {result.width && result.height
-                ? <div>Image · {result.width} × {result.height} px</div>
-                : <div>Engine · client (live tiles)</div>}
+              <div>Engine · {opts.engine === "client" ? "client (live tiles)" : "server (RiverREM COG)"}</div>
+              {opts.engine === "server" && result.width && result.height
+                ? <div>Image · {result.width} × {result.height} px</div> : null}
               <div>Altitude · {result.rem_min.toFixed(1)} – {result.rem_max.toFixed(1)} m above river</div>
+              {result.source_max_zoom != null ? <div>Max terrain zoom · z{result.source_max_zoom} (Mapterhorn)</div> : null}
               {result.river_length_m ? <div>River · {(result.river_length_m / 1000).toFixed(1)} km</div> : null}
             </div>
           )}
@@ -489,26 +505,41 @@ export function SidePanel(p: {
         </>)}
       </div>
 
-      {p.runs.length > 0 && (
+      {(p.runs.length > 0 || ui.runsSource === "server") && (() => {
+        const list = ui.runsSource === "server" ? p.serverRuns : p.runs;
+        const isServer = ui.runsSource === "server";
+        return (
         <>
           <Separator />
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label><span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />Runs</span></Label>
-              <div className="inline-flex overflow-hidden rounded-md border border-border">
-                {([["list", List], ["gallery", LayoutGrid]] as const).map(([v, Icon]) => (
-                  <button key={v} onClick={() => setUi({ runsView: v })}
-                    className={`px-2 py-1 ${ui.runsView === v ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}
-                    aria-label={v}>
-                    <Icon className="h-3.5 w-3.5" />
-                  </button>
-                ))}
+              <div className="flex items-center gap-1.5">
+                <div className="inline-flex overflow-hidden rounded-md border border-border">
+                  {([["device", "This device"], ["server", "Server"]] as const).map(([v, lbl]) => (
+                    <button key={v} onClick={() => setUi({ runsSource: v })}
+                      className={`px-2 py-1 font-mono text-[9px] uppercase ${ui.runsSource === v ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}
+                      aria-label={lbl}>{lbl}</button>
+                  ))}
+                </div>
+                <div className="inline-flex overflow-hidden rounded-md border border-border">
+                  {([["list", List], ["gallery", LayoutGrid]] as const).map(([v, Icon]) => (
+                    <button key={v} onClick={() => setUi({ runsView: v })}
+                      className={`px-2 py-1 ${ui.runsView === v ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}
+                      aria-label={v}>
+                      <Icon className="h-3.5 w-3.5" />
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
+            {isServer && list.length === 0 && (
+              <p className="font-mono text-[10px] text-muted-foreground">No server runs yet (server computes are saved here, shared across devices).</p>
+            )}
 
             {ui.runsView === "gallery" ? (
               <div className="panel-scroll max-h-[28rem] space-y-2 overflow-y-auto">
-                {p.runs.map((r) => {
+                {list.map((r) => {
                   const active = r.id === p.activeRunId;
                   return (
                     <div key={r.id} className={`overflow-hidden rounded-md border ${active ? "border-foreground/40" : "border-border"}`}>
@@ -520,7 +551,7 @@ export function SidePanel(p: {
                             <ImageOff className="h-5 w-5 text-muted-foreground" />
                           </div>
                         )}
-                        <span className={`absolute right-1 top-1 rounded px-1 py-0.5 font-mono text-[8px] uppercase tracking-wide ${r.engine === "client" ? "bg-amber-500/85 text-black" : "bg-sky-600/85 text-white"}`}>
+                        <span className={`absolute right-1 top-1 rounded px-1 py-0.5 font-mono text-[8px] uppercase tracking-wide ${r.engine === "client" ? "bg-foreground text-background" : "bg-sky-600/90 text-white"}`}>
                           {r.engine === "client" ? "client" : "server"}
                         </span>
                       </button>
@@ -547,8 +578,8 @@ export function SidePanel(p: {
                         ) : (
                           <>
                             {active && (<button onClick={() => p.onRecaptureThumb(r.id)} aria-label="recapture thumbnail" className="text-muted-foreground hover:text-foreground"><Camera className="h-3 w-3" /></button>)}
-                            <button onClick={() => { setEditId(r.id); setEditName(r.name || ""); }} aria-label="rename" className="text-muted-foreground hover:text-foreground"><Pencil className="h-3 w-3" /></button>
-                            <button onClick={() => p.onDeleteRun(r.id)} aria-label="delete" className="text-muted-foreground hover:text-foreground"><Trash2 className="h-3 w-3" /></button>
+                            {!isServer && (<button onClick={() => { setEditId(r.id); setEditName(r.name || ""); }} aria-label="rename" className="text-muted-foreground hover:text-foreground"><Pencil className="h-3 w-3" /></button>)}
+                            {!isServer && (<button onClick={() => p.onDeleteRun(r.id)} aria-label="delete" className="text-muted-foreground hover:text-foreground"><Trash2 className="h-3 w-3" /></button>)}
                           </>
                         )}
                       </div>
@@ -558,7 +589,7 @@ export function SidePanel(p: {
               </div>
             ) : (
               <div className="panel-scroll max-h-44 space-y-1 overflow-y-auto">
-                {p.runs.map((r) => {
+                {list.map((r) => {
                   const active = r.id === p.activeRunId;
                   return (
                     <div key={r.id} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 ${active ? "border-foreground/40" : "border-border"}`}>
@@ -575,7 +606,7 @@ export function SidePanel(p: {
                         <button className="min-w-0 flex-1 text-left" onClick={() => p.onLoadRun(r)}>
                           <div className="truncate font-mono text-[11px]">{r.name || r.id.slice(0, 8)}</div>
                           <div className="flex items-center gap-1 font-mono text-[9px] text-muted-foreground">
-                            <span className={`rounded px-1 uppercase ${r.engine === "client" ? "bg-amber-500/20 text-amber-700 dark:text-amber-400" : "bg-sky-600/20 text-sky-700 dark:text-sky-400"}`}>
+                            <span className={`rounded px-1 uppercase ${r.engine === "client" ? "bg-foreground text-background" : "bg-sky-600/20 text-sky-700 dark:text-sky-400"}`}>
                               {r.engine === "client" ? "client" : "server"}
                             </span>
                             <span>{new Date(r.ts).toLocaleString()} · {r.min}–{r.max} m</span>
@@ -590,8 +621,8 @@ export function SidePanel(p: {
                       ) : (
                         <>
                           {active && (<button onClick={() => p.onRecaptureThumb(r.id)} aria-label="recapture thumbnail" className="text-muted-foreground hover:text-foreground"><Camera className="h-3 w-3" /></button>)}
-                          <button onClick={() => { setEditId(r.id); setEditName(r.name || ""); }} aria-label="rename" className="text-muted-foreground hover:text-foreground"><Pencil className="h-3 w-3" /></button>
-                          <button onClick={() => p.onDeleteRun(r.id)} aria-label="delete" className="text-muted-foreground hover:text-foreground"><Trash2 className="h-3 w-3" /></button>
+                          {!isServer && (<button onClick={() => { setEditId(r.id); setEditName(r.name || ""); }} aria-label="rename" className="text-muted-foreground hover:text-foreground"><Pencil className="h-3 w-3" /></button>)}
+                          {!isServer && (<button onClick={() => p.onDeleteRun(r.id)} aria-label="delete" className="text-muted-foreground hover:text-foreground"><Trash2 className="h-3 w-3" /></button>)}
                         </>
                       )}
                     </div>
@@ -601,14 +632,16 @@ export function SidePanel(p: {
             )}
           </div>
         </>
-      )}
+        );
+      })()}
 
       <Separator />
       <div className="space-y-1 font-mono text-[9px] leading-relaxed text-muted-foreground">
         <p>
           REM method:{" "}
-          <a className="underline" href="https://dancoecarto.com/creating-rems-in-qgis-the-idw-method" target="_blank" rel="noreferrer">Dan Coe — IDW</a>{" "}
-          · automated by{" "}
+          <a className="underline" href="https://dancoecarto.com/creating-rems-in-qgis-the-idw-method" target="_blank" rel="noreferrer">Dan Coe — IDW</a>
+          <br />
+          automated by{" "}
           <a className="underline" href="https://opentopography.org/blog/new-package-automates-river-relative-elevation-model-rem-generation" target="_blank" rel="noreferrer">OpenTopography RiverREM</a>{" "}
           (<a className="underline" href="https://github.com/OpenTopography/RiverREM" target="_blank" rel="noreferrer">repo</a>).
         </p>

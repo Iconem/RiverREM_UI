@@ -25,6 +25,10 @@ export type Run = {
   engine?: "server" | "client";       // which REM engine produced this run
   power?: number | null;              // IDW power (client engine)
   clientPts?: number[] | null;        // flattened [mx,my,elev,…] for client reload
+  clGeojson?: GeoJSON.GeoJSON | null;  // centreline geometry (restored as the river preview)
+  width?: number | null;              // REM COG pixel dims (server engine)
+  height?: number | null;
+  srcMaxZoom?: number | null;          // deepest Mapterhorn zoom probed at centre
   name?: string | null;
   cl?: string | null; // centerline GeoJSON url (backend-hosted, shareable)
   thumb?: string | null; // small JPEG data-URL preview for the gallery

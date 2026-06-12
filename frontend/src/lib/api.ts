@@ -16,6 +16,22 @@ export type ComputeRequest = {
   eps?: number;
 };
 
+export type GalleryItem = {
+  id: string;
+  cog_url: string;
+  dem_url?: string | null;
+  bounds: [number, number, number, number];
+  rem_min: number;
+  rem_max: number;
+  width?: number | null;
+  height?: number | null;
+  river_name?: string | null;
+  river_length_m?: number | null;
+  centerline_url?: string | null;
+  thumb?: string | null;
+  ts?: number;
+};
+
 export type ComputeResponse = {
   job_id: string;
   cog_url: string;
@@ -101,6 +117,9 @@ export const api = {
 
   // Persist a gallery thumbnail server-side; returns the hosted URL.
   thumb: (id: string, image: string) => post<{ url: string }>("/thumb", { id, image }),
+
+  // Server-side gallery (run.json sidecars). Read-only list of past server computes.
+  gallery: () => get<{ runs: GalleryItem[] }>("/gallery"),
 
   // Fetch a run's saved centerline GeoJSON (returns null if none).
   centerline: async (url: string): Promise<GeoJSON.GeoJSON | null> => {

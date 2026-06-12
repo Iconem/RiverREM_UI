@@ -7,6 +7,35 @@ sessions, so dates are approximate; the ordering is chronological.
 `0.1.0` is the initial RiverREM Python-backend app. `1.0.0` introduces the pure-frontend
 (client-side JS) REM engine. Anything before `1.0.0` is server-only.
 
+## [1.2.0] — 2026-06-12
+
+### Added
+- **Server-side gallery** — `GET /gallery` reads `run.json` sidecars written next to each
+  COG (filesystem + JSON, no DB) and returns past server runs with their thumbnails. The
+  Runs panel gains a **This device / Server** source toggle; server items load read-only
+  (no rename/delete) and are shared across devices.
+- **Run metadata** in Utilities: engine, image W × H px (server), altitude range, and the
+  **deepest Mapterhorn zoom probed** at the viewport centre.
+- **IDW power help** tooltip (RiverREM uses 1; Dan Coe's QGIS method uses 2).
+- **Waves favicon** (lucide `waves-horizontal`).
+
+### Changed
+- Client runs now **persist + restore the river centreline geometry** (preview), their
+  probed max zoom, and dimensions — fixing the river/thumbnail not surviving reload.
+- Metadata is keyed on the actual engine (server W × H no longer vanishes when reloading a run).
+- **Client COG exports disabled** (REM/DEM) with a hover note — only Composite JPG, Copy,
+  Share and Centerline apply to client runs.
+- **Client run chip** uses the theme background colour (white on dark, dark on light);
+  server stays blue.
+- OSM endpoint label `qlever` → **QLever**, with a separator before the Overpass endpoints.
+- Footer: "automated by OpenTopography RiverREM" on its own line; build hash links to the
+  **iconem** fork and shows the 7-char short SHA.
+
+### Repo
+- Consolidated to two compose files (`docker-compose.yml` public, `docker-compose.local.yml`
+  dev); removed the GHCR variant and all personal domain defaults (placeholders only).
+  README rewritten with a dedicated pure-frontend section; `.gitattributes` (LF).
+
 ## [1.1.0] — 2026-06-12
 
 ### Added

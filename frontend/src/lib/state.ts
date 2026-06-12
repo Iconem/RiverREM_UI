@@ -71,6 +71,7 @@ export function useUiState() {
     foldUtil: parseAsBoolean.withDefault(true), // utilities (basemap/inspect/load) folded
     collapsed: parseAsBoolean.withDefault(false), // whole panel collapsed
     runsView: parseAsStringEnum(["list", "gallery"]).withDefault("list"),
+    runsSource: parseAsStringEnum(["device", "server"]).withDefault("device"),
     theme: parseAsStringEnum(["dark", "light"]).withDefault("dark"),
   });
 }

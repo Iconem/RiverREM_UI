@@ -11,6 +11,7 @@ enqueue + status-poll, but the work is identical). Endpoints:
 from __future__ import annotations
 
 import base64
+import glob
 import json
 import logging
 import math
@@ -18,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import threading
 import uuid
 import zipfile
@@ -222,6 +224,19 @@ def _run_compute(job_id: str, req: ComputeRequest):
             requested_zoom=dem_info.get("requested_zoom"),
         )
         _set(job_id, status="done", phase="Done", pct=100, result=resp.model_dump())
+        # Sidecar metadata for the server-side /gallery (filesystem + JSON, no DB).
+        try:
+            with open(os.path.join(job_dir, "run.json"), "w") as f:
+                json.dump({
+                    "id": job_id,
+                    "cog_url": resp.cog_url, "dem_url": resp.dem_url,
+                    "bounds": resp.bounds, "rem_min": resp.rem_min, "rem_max": resp.rem_max,
+                    "width": resp.width, "height": resp.height,
+                    "river_name": resp.river_name, "river_length_m": resp.river_length_m,
+                    "centerline_url": resp.centerline_url, "ts": int(time.time() * 1000),
+                }, f)
+        except Exception:
+            pass
         _evict_old_cogs()
     except Exception as e:
         _set(job_id, status="error", error=str(e))
@@ -271,6 +286,26 @@ def save_thumb(req: ThumbRequest):
     with open(os.path.join(tdir, f"{safe}.jpg"), "wb") as f:
         f.write(raw)
     return ThumbResponse(url=f"{PUBLIC_BASE}/cogs/thumbs/{safe}.jpg")
+
+
+@app.get("/gallery")
+def gallery():
+    """Server-side gallery (filesystem + JSON, no DB): every compute writes a
+    `run.json` sidecar next to its COG; this globs them, attaches the hosted
+    thumbnail when present, and returns the list newest-first. Read-only."""
+    items = []
+    for path in glob.glob(os.path.join(COG_DIR, "*", "run.json")):
+        try:
+            with open(path) as f:
+                meta = json.load(f)
+        except Exception:
+            continue
+        rid = meta.get("id")
+        thumb_fp = os.path.join(COG_DIR, "thumbs", f"{rid}.jpg") if rid else None
+        meta["thumb"] = f"{PUBLIC_BASE}/cogs/thumbs/{rid}.jpg" if (thumb_fp and os.path.exists(thumb_fp)) else None
+        items.append(meta)
+    items.sort(key=lambda m: m.get("ts", 0), reverse=True)
+    return {"runs": items}
 
 
 @app.post("/upload")

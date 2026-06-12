@@ -19,7 +19,7 @@ const OVERPASS_ENDPOINTS = [
 /** Selectable presets for the UI. QLever speaks SPARQL, not Overpass QL, so it is
  *  marked experimental — if it fails the fallback chain takes over. */
 export const OVERPASS_PRESETS: { label: string; url: string }[] = [
-  { label: "qlever (fast)", url: "https://qlever.dev/api/osm-planet" },
+  { label: "QLever (fast)", url: "https://qlever.dev/api/osm-planet" },
   { label: "overpass.de", url: "https://overpass-api.de/api/interpreter" },
   { label: "kumi.systems", url: "https://overpass.kumi.systems/api/interpreter" },
   { label: "private.coffee", url: "https://overpass.private.coffee/api/interpreter" },

@@ -60,6 +60,21 @@ export default function App() {
   const [phase, setPhase] = useState("");
   const [pct, setPct] = useState(0);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [serverRuns, setServerRuns] = useState<Run[]>([]); // read-only /gallery (server runs)
+  useEffect(() => {
+    if (ui.runsSource !== "server") return;
+    api.gallery().then(({ runs: gs }) => setServerRuns(gs.map((g) => ({
+      id: g.id, cog: g.cog_url, dem: g.dem_url ?? null, bounds: g.bounds,
+      min: g.rem_min, max: Math.max(1, g.rem_max), log: true,
+      demMin: null, demMax: null, demLog: null,
+      ramp: "mako_r", reverse: false, transparent: "none" as const,
+      hillshade: "off" as const, base: "dark", layer: "rem" as const,
+      sliderLo: null, sliderHi: null, engine: "server" as const,
+      width: g.width ?? null, height: g.height ?? null, srcMaxZoom: null,
+      cl: g.centerline_url ?? null, name: g.river_name ?? null,
+      thumb: g.thumb ?? null, ts: g.ts ?? 0,
+    })))).catch(() => setServerRuns([]));
+  }, [ui.runsSource]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [remVisible, setRemVisible] = useState(true);
   const [pickMode, setPickMode] = useState(false);
@@ -235,7 +250,9 @@ export default function App() {
       ramp: opts.ramp, reverse: opts.reverse, transparent: opts.transparent,
       hillshade: opts.hillshade, base: opts.base, layer: "rem",
       sliderLo: opts.sliderLo ?? null, sliderHi: opts.sliderHi ?? null, name,
-      cl: res.centerline_url ?? null, ts: Date.now(),
+      cl: res.centerline_url ?? null, engine: "server",
+      width: res.width ?? null, height: res.height ?? null, srcMaxZoom: res.source_max_zoom ?? null,
+      ts: Date.now(),
     }));
     return id;
   }, [opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.sliderLo, opts.sliderHi, setActiveRem]);
@@ -243,7 +260,7 @@ export default function App() {
   // Persist a client-engine run. It has no backend COG — instead it stores the
   // sampled river points (packed) so it can be re-rendered offline on reload.
   const recordClientRun = useCallback(async (
-    bounds: [number, number, number, number], pts: RiverPoint[], remB: Bounds,
+    bounds: [number, number, number, number], pts: RiverPoint[], remB: Bounds, maxZ: number, cl: GeoJSON.GeoJSON | null,
   ) => {
     const id = crypto.randomUUID();
     let name = centerInfo?.river_name ?? null;
@@ -261,6 +278,7 @@ export default function App() {
       hillshade: opts.hillshade, base: opts.base, layer: "rem",
       sliderLo: opts.sliderLo ?? null, sliderHi: opts.sliderHi ?? null,
       engine: "client", power: opts.power, clientPts: packPts(pts),
+      clGeojson: cl ?? null, srcMaxZoom: maxZ,
       name, cl: null, ts: Date.now(),
     }, false));
     return id;
@@ -298,9 +316,10 @@ export default function App() {
           job_id: "client", cog_url: "", dem_url: null, bounds,
           rem_min: -1, rem_max: 10, river_name: centerInfo?.river_name ?? null,
           river_length_m: centerInfo?.river_length_m ?? null,
+          source_max_zoom: maxZ,
         } as ComputeResponse);
         setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
-        const id = await recordClientRun(bounds, pts, remB);
+        const id = await recordClientRun(bounds, pts, remB, maxZ, cl);
         setFitSignal((n) => n + 1);
         captureThumb(id);
       } catch (e) { alert(`Client compute failed: ${(e as Error).message}`); }
@@ -364,7 +383,7 @@ export default function App() {
     const remB: Bounds = { min: r.min, max: r.max, log: r.log ?? true };
     const demB: Bounds | null = r.demMin != null && r.demMax != null
       ? { min: r.demMin, max: r.demMax, log: r.demLog ?? false } : null;
-    setResult({ job_id: r.id, cog_url: r.cog, dem_url: r.dem, bounds: r.bounds, rem_min: r.min, rem_max: r.max, dem_min: demB?.min ?? null, dem_max: demB?.max ?? null, river_name: r.name ?? null, river_length_m: null, centerline_url: r.cl ?? null });
+    setResult({ job_id: r.id, cog_url: r.cog, dem_url: r.dem, bounds: r.bounds, rem_min: r.min, rem_max: r.max, dem_min: demB?.min ?? null, dem_max: demB?.max ?? null, river_name: r.name ?? null, river_length_m: null, centerline_url: r.cl ?? null, width: r.width ?? null, height: r.height ?? null, source_max_zoom: r.srcMaxZoom ?? null });
     setActiveRem({ cog: r.cog, dem: r.dem || "", bounds: r.bounds });
     setActiveRunId(r.id); setRemVisible(true);
     setRemBounds(remB); setDemBounds(demB);
@@ -372,17 +391,19 @@ export default function App() {
     if (r.engine === "client" && r.clientPts?.length) {
       const pts = unpackPts(r.clientPts);
       setRiverPoints(pts); setRemParams(pts, r.power ?? 2); setRemToken((n) => n + 1);
-      const [w, s, e, n] = r.bounds;
-      probeMaxZoom((w + e) / 2, (s + n) / 2).then(setClientMaxZoom);
+      setClientMaxZoom(r.srcMaxZoom ?? 14);
     }
     setOpts({
       ramp: r.ramp as any, reverse: !!r.reverse, transparent: (r.transparent ?? "none") as any,
       hillshade: (r.hillshade ?? "off") as any, base: (r.base ?? "dark") as any,
       sliderLo: r.sliderLo ?? null, sliderHi: r.sliderHi ?? null,
-      engine: (r.engine ?? "server") as any, power: r.power ?? 1,
+      engine: (r.engine ?? "server") as any, power: r.power ?? 2,
       min: remB.min, max: remB.max, log: remB.log, layer: "rem",
     });
-    if (r.cl) api.centerline(r.cl).then(setCenterline); else setCenterline(null);
+    // Restore the river preview: client runs carry the geometry inline; server runs fetch it.
+    if (r.clGeojson) setCenterline(r.clGeojson);
+    else if (r.cl) api.centerline(r.cl).then(setCenterline);
+    else setCenterline(null);
     setResNote(null);
     setFitSignal((n) => n + 1);
     if (!r.thumb) captureThumb(r.id);
@@ -521,6 +542,7 @@ export default function App() {
           hasCenterline={!!centerline}
           previewInfo={centerInfo}
           runs={runs}
+          serverRuns={serverRuns}
           activeRunId={activeRunId}
           remVisible={remVisible}
           pickMode={pickMode}
