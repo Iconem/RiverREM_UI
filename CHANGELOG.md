@@ -7,6 +7,21 @@ sessions, so dates are approximate; the ordering is chronological.
 `0.1.0` is the initial RiverREM Python-backend app. `1.0.0` introduces the pure-frontend
 (client-side JS) REM engine. Anything before `1.0.0` is server-only.
 
+## [1.2.1] — 2026-06-12
+
+### Fixed
+- **`/gallery`, `/thumb`, `/runs` now reach the API** — nginx only proxied a fixed list of
+  paths, so these fell through to the SPA (returning index.html). Added them to the proxy
+  rule. (This also fixes server-side thumbnail uploads, which had been silently failing.)
+- IDW power / River-samples labels and inputs are now aligned.
+
+### Changed
+- IDW power column narrowed to ~25% (Resolution/Samples ~75%); Resolution tabs fill width.
+- **"View REM in cog-viewer"** disabled for client runs; download buttons reordered
+  (Composite JPG + REM COG on the first row, Centerline + DEM COG on the second).
+- The "Colour ramp" panel is now **Symbology**, with a **Colour ramp** subsection and a
+  **Layers style** subsection holding Basemap + Relief overlay (moved out of Utilities).
+
 ## [1.2.0] — 2026-06-12
 
 ### Added

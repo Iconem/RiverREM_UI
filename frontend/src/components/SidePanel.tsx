@@ -242,9 +242,9 @@ export function SidePanel(p: {
         </Tabs>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-[1fr_3fr] items-end gap-2">
         <div className="space-y-1">
-          <div className="flex items-center gap-1">
+          <div className="flex h-4 items-center gap-1">
             <Label>IDW power</Label>
             <span title="Inverse-distance weighting exponent. OpenTopography/RiverREM uses 1; Dan Coe's original QGIS method uses 2. Higher = more local (closer samples dominate)."
               className="inline-flex cursor-help" aria-label="IDW power help">
@@ -256,18 +256,16 @@ export function SidePanel(p: {
         </div>
         {opts.engine === "client" ? (
           <div className="space-y-1">
-            <Label>River samples</Label>
+            <div className="flex h-4 items-center"><Label>River samples</Label></div>
             <Input type="number" step="10" min="10" max="1000" value={opts.samples}
               onChange={(e) => setOpts({ samples: Math.max(10, Math.min(1000, parseInt(e.target.value) || 150)) })} />
           </div>
         ) : (
-          <div className="flex flex-col justify-end">
-            <div className="flex items-center justify-between">
-              <Label>Resolution</Label>
-              <Tabs value={String(opts.res)} onValueChange={(v) => setOpts({ res: Number(v) })}>
-                <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-2">{r}×</TabsTrigger>)}</TabsList>
-              </Tabs>
-            </div>
+          <div className="space-y-1">
+            <div className="flex h-4 items-center"><Label>Resolution</Label></div>
+            <Tabs value={String(opts.res)} onValueChange={(v) => setOpts({ res: Number(v) })}>
+              <TabsList className="grid w-full grid-cols-3">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)}>{r}×</TabsTrigger>)}</TabsList>
+            </Tabs>
           </div>
         )}
       </div>
@@ -308,10 +306,10 @@ export function SidePanel(p: {
 
       <Separator />
 
-      {/* Colour ramp (foldable) */}
+      {/* Symbology (foldable): colour ramp + layer styling */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <FoldHeader label="Colour ramp" folded={ui.foldRamp} onClick={() => setUi({ foldRamp: !ui.foldRamp })} />
+          <FoldHeader label="Symbology" folded={ui.foldRamp} onClick={() => setUi({ foldRamp: !ui.foldRamp })} />
           {result && (
             <button
               onClick={(e) => { e.stopPropagation(); p.onSaveSymbology(); }}
@@ -323,6 +321,7 @@ export function SidePanel(p: {
           )}
         </div>
         {!ui.foldRamp && (<>
+          <div className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">Colour ramp</div>
           <div className="space-y-2">
             <div className="flex items-center justify-end gap-2">
               <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
@@ -399,6 +398,34 @@ export function SidePanel(p: {
               <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
             </div>
           </div>
+
+          <Separator />
+          <div className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">Layers style</div>
+          <div className="flex items-center justify-between">
+            <Label>Basemap</Label>
+            <div className="w-44">
+              <Select value={opts.base} onValueChange={(v) => setOpts({ base: v as Opts["base"] })}>
+                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dark">Dark (OSM)</SelectItem>
+                  <SelectItem value="light">Light (OSM)</SelectItem>
+                  <SelectItem value="satellite">Satellite (Esri)</SelectItem>
+                  <SelectItem value="hillshade">Hillshade (Mapterhorn)</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <Label>Relief overlay</Label>
+            <Tabs value={opts.hillshade} onValueChange={(v) => setOpts({ hillshade: v as Opts["hillshade"] })}>
+              <TabsList className="w-auto">
+                <TabsTrigger value="off" className="px-2">Off</TabsTrigger>
+                <TabsTrigger value="dark" className="px-2">Dark</TabsTrigger>
+                <TabsTrigger value="light" className="px-2">Light</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
         </>)}
       </div>
 
@@ -418,11 +445,13 @@ export function SidePanel(p: {
               <Button variant="outline" size="sm" onClick={p.onExportComposite}><Download className="mr-1 h-3 w-3" />Composite JPG</Button>
               <Button variant="outline" size="sm" onClick={p.onExportRaw} disabled={opts.engine === "client"}
                 title={opts.engine === "client" ? "COGs can only be exported for server runs" : undefined}><FileDown className="mr-1 h-3 w-3" />REM COG</Button>
+              <Button variant="outline" size="sm" onClick={p.onExportCenterline} disabled={!p.hasCenterline}><FileDown className="mr-1 h-3 w-3" />Centerline</Button>
               <Button variant="outline" size="sm" onClick={p.onExportDem} disabled={opts.engine === "client" || !result.dem_url}
                 title={opts.engine === "client" ? "COGs can only be exported for server runs" : undefined}><FileDown className="mr-1 h-3 w-3" />DEM COG</Button>
-              <Button variant="outline" size="sm" onClick={p.onExportCenterline} disabled={!p.hasCenterline}><FileDown className="mr-1 h-3 w-3" />Centerline</Button>
             </div>
             <Button variant="ghost" size="sm" className="h-7 w-full gap-1 text-xs"
+              disabled={opts.engine === "client"}
+              title={opts.engine === "client" ? "cog-viewer is only available for server runs" : undefined}
               onClick={() => {
                 const dem = p.layer === "dem" && result.dem_url;
                 const url = dem ? result.dem_url! : result.cog_url;
@@ -452,32 +481,6 @@ export function SidePanel(p: {
               {result.river_length_m ? <div>River · {(result.river_length_m / 1000).toFixed(1)} km</div> : null}
             </div>
           )}
-          <div className="flex items-center justify-between">
-            <Label>Basemap</Label>
-            <div className="w-44">
-              <Select value={opts.base} onValueChange={(v) => setOpts({ base: v as Opts["base"] })}>
-                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="dark">Dark (OSM)</SelectItem>
-                  <SelectItem value="light">Light (OSM)</SelectItem>
-                  <SelectItem value="satellite">Satellite (Esri)</SelectItem>
-                  <SelectItem value="hillshade">Hillshade (Mapterhorn)</SelectItem>
-                  <SelectItem value="none">None</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label>Relief overlay</Label>
-            <Tabs value={opts.hillshade} onValueChange={(v) => setOpts({ hillshade: v as Opts["hillshade"] })}>
-              <TabsList className="w-auto">
-                <TabsTrigger value="off" className="px-2">Off</TabsTrigger>
-                <TabsTrigger value="dark" className="px-2">Dark</TabsTrigger>
-                <TabsTrigger value="light" className="px-2">Light</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
 
           {result && (
             <div className="space-y-1">
