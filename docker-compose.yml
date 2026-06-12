@@ -27,6 +27,7 @@ services:
       context: ./frontend
       args:
         VITE_API_BASE: ${VITE_API_BASE:-}
+        VITE_GIT_SHA: ${GIT_SHA:-dev}
     image: riverrem-web:latest
     container_name: riverrem-web
     depends_on: [api]

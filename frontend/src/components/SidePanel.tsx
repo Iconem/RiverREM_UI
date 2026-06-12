@@ -21,6 +21,7 @@ import type { ComputeResponse, GeoHit } from "@/lib/api";
 
 type Opts = {
   mode: "osm" | "geojson" | "shapefile";
+  engine: "server" | "client"; power: number; samples: number;
   base: "dark" | "satellite" | "hillshade" | "none";
   ramp: (typeof RAMP_NAMES)[number];
   reverse: boolean; transparent: "none" | "white" | "black"; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; sliderLo: number | null; sliderHi: number | null; osm: string;
@@ -72,6 +73,7 @@ export function SidePanel(p: {
   pick: { lng: number; lat: number; rem: number | null; dem: number | null } | null;
   geoHits: GeoHit[];
   onPreview: () => void; onCompute: () => void; onUpload: (f: File) => void; onLoadCog: (url: string) => void;
+  demCogUrl: string; setDemCogUrl: (v: string) => void;
   onShare: () => void; onExportComposite: () => void; onCopyImage: () => void;
   onExportRaw: () => void; onExportDem: () => void; onExportCenterline: () => void;
   onLoadRun: (r: Run) => void; onDeleteRun: (id: string) => void; onRenameRun: (id: string, name: string) => void;
@@ -113,7 +115,9 @@ export function SidePanel(p: {
   const flipLayer = () => p.onSetLayer(p.layer === "rem" ? "dem" : "rem");
 
   const cardBase =
-    "pointer-events-auto absolute left-4 top-4 z-50 w-[360px] shadow-2xl backdrop-blur supports-[backdrop-filter]:bg-background/85";
+    `pointer-events-auto absolute left-4 top-4 z-50 w-[360px] shadow-2xl backdrop-blur ${
+      ui.theme === "light" ? "supports-[backdrop-filter]:bg-background/95" : "supports-[backdrop-filter]:bg-background/85"
+    }`;
 
   if (ui.collapsed) {
     return (
@@ -210,13 +214,49 @@ export function SidePanel(p: {
 
       <Separator />
 
-      {/* Resolution + compute */}
+      {/* Engine + resolution + compute */}
       <div className="flex items-center justify-between">
-        <Label>Resolution</Label>
-        <Tabs value={String(opts.res)} onValueChange={(v) => setOpts({ res: Number(v) })}>
-          <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-3">{r}×</TabsTrigger>)}</TabsList>
+        <Label>Engine</Label>
+        <Tabs value={opts.engine} onValueChange={(v) => setOpts({ engine: v as Opts["engine"] })}>
+          <TabsList className="w-auto">
+            <TabsTrigger value="server" className="px-3">Server</TabsTrigger>
+            <TabsTrigger value="client" className="px-3">Client</TabsTrigger>
+          </TabsList>
         </Tabs>
       </div>
+
+      {opts.engine === "client" ? (
+        <>
+          <p className="font-mono text-[10px] leading-snug text-muted-foreground">
+            Experimental — REM is sampled &amp; built live in your browser (Mapterhorn DEM, IDW), no server compute.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label>IDW power</Label>
+              <Input type="number" step="0.5" min="0.5" max="3" value={opts.power}
+                onChange={(e) => setOpts({ power: Math.max(0.5, Math.min(3, parseFloat(e.target.value) || 1)) })} />
+            </div>
+            <div className="space-y-1">
+              <Label>River samples</Label>
+              <Input type="number" step="10" min="8" max="600" value={opts.samples}
+                onChange={(e) => setOpts({ samples: Math.max(8, Math.min(600, parseInt(e.target.value) || 150)) })} />
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Resolution</Label>
+            <Tabs value={String(opts.res)} onValueChange={(v) => setOpts({ res: Number(v) })}>
+              <TabsList className="w-auto">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)} className="px-3">{r}×</TabsTrigger>)}</TabsList>
+            </Tabs>
+          </div>
+          <div className="space-y-1">
+            <Label>DEM COG URL (optional)</Label>
+            <Input value={p.demCogUrl} onChange={(e) => p.setDemCogUrl(e.target.value)} placeholder="https://…/dem.tif — overrides Mapterhorn" />
+          </div>
+        </div>
+      )}
 
       <Button className="h-10 w-full" onClick={p.onCompute} disabled={busy}>
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -546,6 +586,13 @@ export function SidePanel(p: {
           <a className="underline" href="/rem-pure-frontend.html" target="_blank" rel="noreferrer">
             WIP — experimental pure-frontend / client-side JS River REM (MapLibre)
           </a>
+        </p>
+        <p className="opacity-70">
+          build{" "}
+          {import.meta.env.VITE_GIT_SHA
+            ? <a className="underline" target="_blank" rel="noreferrer"
+                href={`https://github.com/jo-chemla/RiverREM_UI/commit/${import.meta.env.VITE_GIT_SHA}`}>{import.meta.env.VITE_GIT_SHA}</a>
+            : "dev"}
         </p>
       </div>
     </Card>

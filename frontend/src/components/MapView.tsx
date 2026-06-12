@@ -4,6 +4,7 @@ import maplibregl from "maplibre-gl";
 import type { StyleSpecification, Map as MlMap } from "maplibre-gl";
 import { cogProtocol, setColorFunction } from "@geomatico/maplibre-cog-protocol";
 import { colorReliefExpr } from "@/lib/colormap";
+import { ensureRemProtocol, setRemParams, type RiverPoint } from "@/lib/remClient";
 import type { BBox } from "@/lib/api";
 
 // Register the geomatico COG protocol once. For the `cog://…#dem` path we register a
@@ -72,6 +73,7 @@ type Opts = { ramp: string; min: number; max: number; mode: string; base: string
 
 export function MapView({
   initialView, opts, cogUrl, cogBounds, fitSignal, theme, preview, remVisible, pickMode,
+  engine, riverPoints, idwPower, remToken,
   onBounds, onView, onDrawn, onMapReady, onPick,
 }: {
   initialView: { lng: number; lat: number; zoom: number };
@@ -81,6 +83,10 @@ export function MapView({
   fitSignal: number;
   theme: "dark" | "light";
   preview: GeoJSON.GeoJSON | null;
+  engine: "server" | "client";
+  riverPoints: RiverPoint[] | null;
+  idwPower: number;
+  remToken: number;
   remVisible: boolean;
   pickMode: boolean;
   onBounds: (b: BBox, zoom: number) => void;
@@ -112,24 +118,40 @@ export function MapView({
       if (map.getSource(remRef.current.src)) map.removeSource(remRef.current.src);
       remRef.current = null;
     }
-    if (!cogUrl) return;
 
-    const url = `cog://${cogUrl}#dem`;
-    // Force TERRARIUM encoding (~4 mm step) on the #dem path: a custom color function
-    // wins over geomatico's built-in terrain encoder. IMPORTANT: geomatico keys the
-    // function by the BARE cog url (no cog:// prefix, no #dem) — see its README.
-    setColorFunction(cogUrl, terrariumColorFunction);
-
-    const key = `${cogUrl.replace(/\W+/g, "").slice(-10)}-${Date.now().toString(36)}`;
+    const key = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const src = `rem-src-${key}`;
     const layer = `rem-layer-${key}`;
-    map.addSource(src, {
-      type: "raster-dem",
-      url,
-      tileSize: 256,
-      encoding: "terrarium",
-      bounds: cogBounds ?? undefined,
-    } as any);
+
+    if (engine === "client") {
+      // Pure-JS engine: build the REM live per tile from sampled river points.
+      if (!riverPoints || riverPoints.length === 0) return;
+      ensureRemProtocol();
+      setRemParams(riverPoints, idwPower);
+      map.addSource(src, {
+        type: "raster-dem",
+        tiles: ["rem://tiles/{z}/{x}/{y}"],
+        tileSize: 256,
+        encoding: "terrarium",
+        bounds: cogBounds ?? undefined,
+        maxzoom: 14,
+      } as any);
+    } else {
+      if (!cogUrl) return;
+      const url = `cog://${cogUrl}#dem`;
+      // Force TERRARIUM encoding (~4 mm step) on the #dem path: a custom color function
+      // wins over geomatico's built-in terrain encoder. IMPORTANT: geomatico keys the
+      // function by the BARE cog url (no cog:// prefix, no #dem) — see its README.
+      setColorFunction(cogUrl, terrariumColorFunction);
+      map.addSource(src, {
+        type: "raster-dem",
+        url,
+        tileSize: 256,
+        encoding: "terrarium",
+        bounds: cogBounds ?? undefined,
+      } as any);
+    }
+
     map.addLayer({
       id: layer, type: "color-relief", source: src,
       layout: { visibility: remVisible ? "visible" : "none" },
@@ -137,7 +159,7 @@ export function MapView({
     } as any);
     remRef.current = { src, layer };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cogUrl, ready]);
+  }, [engine, cogUrl, remToken, ready]);
 
   // Fit the camera to the COG only on an explicit signal (run load / compute
   // complete) — never on a plain REM/DEM layer toggle, which also changes cogUrl.
@@ -169,7 +191,7 @@ export function MapView({
     map.setLayoutProperty(id, "visibility", "visible");
     map.moveLayer(id); // keep it topmost, above the freshly (re)added color-relief
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opts.hillshade, ready, cogUrl]);
+  }, [opts.hillshade, ready, cogUrl, remToken, engine]);
 
   // Live recolour — just update the paint expression (GPU, instant).
   useEffect(() => {
@@ -177,7 +199,7 @@ export function MapView({
     const id = remRef.current?.layer;
     if (!map || !ready || !id || !map.getLayer(id)) return;
     map.setPaintProperty(id, "color-relief-color", colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse, opts.transparent) as any);
-  }, [opts.ramp, opts.reverse, opts.min, opts.max, opts.transparent, cogUrl, ready]);
+  }, [opts.ramp, opts.reverse, opts.min, opts.max, opts.transparent, cogUrl, remToken, engine, ready]);
 
   // Layer show/hide (eye toggle).
   useEffect(() => {
@@ -185,7 +207,7 @@ export function MapView({
     const id = remRef.current?.layer;
     if (!map || !ready || !id || !map.getLayer(id)) return;
     map.setLayoutProperty(id, "visibility", remVisible ? "visible" : "none");
-  }, [remVisible, ready, cogUrl]);
+  }, [remVisible, ready, cogUrl, remToken, engine]);
 
   // Basemap switching.
   useEffect(() => {

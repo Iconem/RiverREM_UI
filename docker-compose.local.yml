@@ -19,6 +19,7 @@ services:
       context: ./frontend
       args:
         VITE_API_BASE: ""
+        VITE_GIT_SHA: ${GIT_SHA:-dev}
     ports:
       - "${WEB_PORT:-8088}:80"
     depends_on: [api]

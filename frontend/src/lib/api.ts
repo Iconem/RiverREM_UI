@@ -9,6 +9,7 @@ export type ComputeRequest = {
   centerline_mode: "osm" | "geojson" | "shapefile";
   centerline_geojson?: GeoJSON.GeoJSON | null;
   upload_id?: string | null;
+  source_cog_url?: string | null;
   interp_pts?: number;
   k?: number | null;
   eps?: number;

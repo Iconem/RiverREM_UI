@@ -162,7 +162,7 @@ def _run_compute(job_id: str, req: ComputeRequest):
     try:
         _set(job_id, phase="Fetching terrain tiles", pct=0)
         dem_path = os.path.join(job_dir, "dem.tif")
-        dem_info = build_dem(req.bbox, req.zoom, req.resolution_multiplier, dem_path)
+        dem_info = build_dem(req.bbox, req.zoom, req.resolution_multiplier, dem_path, req.source_cog_url)
 
         _set(job_id, phase="Resolving centerline")
         centerline_shp = None

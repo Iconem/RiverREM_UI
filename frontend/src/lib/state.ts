@@ -32,6 +32,9 @@ export function useMapView() {
 export function useRemOptions() {
   return useQueryStates({
     mode: parseAsStringEnum(["osm", "geojson", "shapefile"]).withDefault("osm"),
+    engine: parseAsStringEnum(["server", "client"]).withDefault("server"), // server=RiverREM COG, client=pure-JS live tiles
+    power: parseAsFloat.withDefault(1), // IDW power (client engine)
+    samples: parseAsInteger.withDefault(150), // river WSE sample count (client engine)
     base: parseAsStringEnum([...BASEMAPS]).withDefault("dark"),
     ramp: parseAsStringEnum([...RAMP_NAMES]).withDefault("mako_r"),
     reverse: parseAsBoolean.withDefault(false),

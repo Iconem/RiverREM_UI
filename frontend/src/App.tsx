@@ -5,6 +5,7 @@ import { SidePanel } from "@/components/SidePanel";
 import { useMapView, useRemOptions, useActiveRem, useUiState } from "@/lib/state";
 import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit } from "@/lib/api";
 import { fetchLongestRiver, mergeFeatureCollection } from "@/lib/osm";
+import { sampleRiverPoints, setRemParams, packPts, unpackPts, type RiverPoint } from "@/lib/remClient";
 import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
 
 function download(blob: Blob, name: string) {
@@ -69,6 +70,9 @@ export default function App() {
   const [demBounds, setDemBounds] = useState<Bounds | null>(null);
   const [fitSignal, setFitSignal] = useState(0); // bumps only on run load / compute complete
   const [resNote, setResNote] = useState<string | null>(null); // resolution-cap note from last build
+  const [riverPoints, setRiverPoints] = useState<RiverPoint[] | null>(null); // client engine WSE points
+  const [remToken, setRemToken] = useState(0); // bump to force the client rem:// source to rebuild
+  const [demCogUrl, setDemCogUrl] = useState(""); // optional DEM COG for the server engine
 
   const bboxRef = useRef<{ bbox: BBox; zoom: number } | null>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -233,8 +237,70 @@ export default function App() {
     return id;
   }, [opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.sliderLo, opts.sliderHi, setActiveRem]);
 
+  // Persist a client-engine run. It has no backend COG — instead it stores the
+  // sampled river points (packed) so it can be re-rendered offline on reload.
+  const recordClientRun = useCallback(async (
+    bounds: [number, number, number, number], pts: RiverPoint[], remB: Bounds,
+  ) => {
+    const id = crypto.randomUUID();
+    let name = centerInfo?.river_name ?? null;
+    if (!name) {
+      const c = bboxRef.current?.bbox;
+      if (c) name = await reverseGeocode((c.west + c.east) / 2, (c.south + c.north) / 2);
+    }
+    setActiveRem({ cog: "", dem: "", bounds });
+    setActiveRunId(id);
+    setRuns(addRun({
+      id, cog: "", dem: null, bounds,
+      min: remB.min, max: remB.max, log: remB.log,
+      demMin: null, demMax: null, demLog: null,
+      ramp: opts.ramp, reverse: opts.reverse, transparent: opts.transparent,
+      hillshade: opts.hillshade, base: opts.base, layer: "rem",
+      sliderLo: opts.sliderLo ?? null, sliderHi: opts.sliderHi ?? null,
+      engine: "client", power: opts.power, clientPts: packPts(pts),
+      name, cl: null, ts: Date.now(),
+    }, false));
+    return id;
+  }, [centerInfo, opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.sliderLo, opts.sliderHi, opts.power, setActiveRem]);
+
   const onCompute = useCallback(async () => {
     if (!bboxRef.current) return;
+
+    // ── CLIENT ENGINE: sample the river + build REM tiles live in the browser ──
+    if (opts.engine === "client") {
+      setBusy(true); setRemVisible(true); setResNote(null); setPhase("Finding river"); setPct(10);
+      try {
+        let cl = centerline;
+        if (opts.mode !== "shapefile" && !cl) {
+          const r = await fetchLongestRiver(bboxRef.current.bbox, opts.osm);
+          cl = r.geojson; setCenterline(r.geojson);
+          setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
+        }
+        setPhase("Sampling river"); setPct(45);
+        const z = bboxRef.current.zoom;
+        const demZoom = Math.min(14, Math.max(10, Math.round(z) + 1));
+        const pts = await sampleRiverPoints(cl, demZoom, Math.max(8, opts.samples));
+        if (pts.length === 0) throw new Error("No river elevations sampled in view");
+        setPhase("Building tiles"); setPct(80);
+        setRiverPoints(pts); setRemParams(pts, opts.power); setRemToken((n) => n + 1);
+        const bb = bboxRef.current.bbox;
+        const bounds: [number, number, number, number] = [bb.west, bb.south, bb.east, bb.north];
+        const remB: Bounds = { min: -1, max: 10, log: true };
+        setRemBounds(remB); setDemBounds(null);
+        setResult({
+          job_id: "client", cog_url: "", dem_url: null, bounds,
+          rem_min: -1, rem_max: 10, river_name: centerInfo?.river_name ?? null,
+          river_length_m: centerInfo?.river_length_m ?? null,
+        } as ComputeResponse);
+        setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
+        const id = await recordClientRun(bounds, pts, remB);
+        setFitSignal((n) => n + 1);
+        captureThumb(id);
+      } catch (e) { alert(`Client compute failed: ${(e as Error).message}`); }
+      finally { setBusy(false); setPhase(""); setPct(0); }
+      return;
+    }
+
     setBusy(true); setRemVisible(true); setResNote(null); setPhase("Finding river"); setPct(8);
     try {
       let cl = centerline;
@@ -250,6 +316,7 @@ export default function App() {
           resolution_multiplier: opts.res as 1 | 2 | 4,
           centerline_mode: usingShp ? "shapefile" : "geojson",
           centerline_geojson: usingShp ? null : cl, upload_id: usingShp ? uploadId : null,
+          source_cog_url: demCogUrl.trim() || null,
         },
         (ph, p) => { setPhase(ph); setPct(displayPct(ph, p)); }
       );
@@ -265,7 +332,7 @@ export default function App() {
       captureThumb(id);
     } catch (e) { alert(`Compute failed: ${(e as Error).message}`); }
     finally { setBusy(false); setPhase(""); setPct(0); }
-  }, [opts.res, opts.mode, opts.osm, centerline, uploadId, setOpts, recordRun, captureThumb]);
+  }, [opts.res, opts.mode, opts.osm, opts.engine, opts.samples, opts.power, centerline, centerInfo, uploadId, demCogUrl, setOpts, recordRun, recordClientRun, captureThumb]);
 
   const onLoadCog = useCallback(async (url: string) => {
     setBusy(true); setRemVisible(true); setPhase("Reprojecting COG"); setPct(40);
@@ -293,10 +360,16 @@ export default function App() {
     setActiveRem({ cog: r.cog, dem: r.dem || "", bounds: r.bounds });
     setActiveRunId(r.id); setRemVisible(true);
     setRemBounds(remB); setDemBounds(demB);
+    // Client runs: re-seed the sampled points so the rem:// source rebuilds offline.
+    if (r.engine === "client" && r.clientPts?.length) {
+      const pts = unpackPts(r.clientPts);
+      setRiverPoints(pts); setRemParams(pts, r.power ?? 1); setRemToken((n) => n + 1);
+    }
     setOpts({
       ramp: r.ramp as any, reverse: !!r.reverse, transparent: (r.transparent ?? "none") as any,
       hillshade: (r.hillshade ?? "off") as any, base: (r.base ?? "dark") as any,
       sliderLo: r.sliderLo ?? null, sliderHi: r.sliderHi ?? null,
+      engine: (r.engine ?? "server") as any, power: r.power ?? 1,
       min: remB.min, max: remB.max, log: remB.log, layer: "rem",
     });
     if (r.cl) api.centerline(r.cl).then(setCenterline); else setCenterline(null);
@@ -410,6 +483,10 @@ export default function App() {
         fitSignal={fitSignal}
         theme={ui.theme}
         preview={centerline}
+        engine={opts.engine}
+        riverPoints={riverPoints}
+        idwPower={opts.power}
+        remToken={remToken}
         remVisible={remVisible}
         pickMode={pickMode}
         onBounds={onBounds}
@@ -442,6 +519,8 @@ export default function App() {
           onCompute={onCompute}
           onUpload={onImport}
           onLoadCog={onLoadCog}
+          demCogUrl={demCogUrl}
+          setDemCogUrl={setDemCogUrl}
           onShare={onShare}
           onExportComposite={onExportComposite}
           onCopyImage={onCopyImage}

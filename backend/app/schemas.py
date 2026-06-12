@@ -29,6 +29,10 @@ class ComputeRequest(BaseModel):
     centerline_geojson: Optional[dict] = None
     upload_id: Optional[str] = None
 
+    # Optional elevation COG to use as the DEM instead of Mapterhorn terrain tiles
+    # (read remotely via GDAL /vsicurl/). When set, the zoom machinery is bypassed.
+    source_cog_url: Optional[str] = None
+
     # RiverREM knobs (mirror REMMaker kwargs).
     interp_pts: int = 1000
     k: Optional[int] = None

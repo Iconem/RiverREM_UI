@@ -22,6 +22,9 @@ export type Run = {
   layer?: "rem" | "dem" | null;       // which layer was being viewed
   sliderLo?: number | null;           // custom slider bounds (null = auto)
   sliderHi?: number | null;
+  engine?: "server" | "client";       // which REM engine produced this run
+  power?: number | null;              // IDW power (client engine)
+  clientPts?: number[] | null;        // flattened [mx,my,elev,…] for client reload
   name?: string | null;
   cl?: string | null; // centerline GeoJSON url (backend-hosted, shareable)
   thumb?: string | null; // small JPEG data-URL preview for the gallery

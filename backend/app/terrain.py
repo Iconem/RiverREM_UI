@@ -105,8 +105,12 @@ def max_available_zoom(lon: float, lat: float, ceiling: int | None = None) -> in
     return _max_zoom_cached(round(lon, 3), round(lat, 3), ceiling or TERRAIN_MAX_ZOOM)
 
 
-def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str) -> dict:
+def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str, source_cog_url: str | None = None) -> dict:
     """Fetch terrain tiles for `bbox`, decode, mosaic, reproject to UTM, write GeoTIFF.
+
+    If `source_cog_url` is given, that elevation COG is used as the DEM instead of
+    Mapterhorn — GDAL reads it (remote via /vsicurl/) and warps the bbox to UTM so
+    RiverREM runs on the caller's own terrain. The zoom machinery is skipped.
 
     `bbox` has .west/.south/.east/.north in WGS84 degrees. The DEM is fetched at
     `zoom + log2(multiplier)`, clamped to the deepest zoom the source actually
@@ -117,6 +121,26 @@ def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str) -> dic
     """
     cx0 = (bbox.west + bbox.east) / 2.0
     cy0 = (bbox.south + bbox.north) / 2.0
+    utm_zone = int((cx0 + 180) / 6) + 1
+    epsg_utm = (32600 if cy0 >= 0 else 32700) + utm_zone
+
+    if source_cog_url:
+        src = source_cog_url
+        if src.startswith("http://") or src.startswith("https://"):
+            src = "/vsicurl/" + src
+        _log.info("DEM build: using provided source COG %s", source_cog_url)
+        gdal.Warp(
+            out_path, src,
+            dstSRS=f"EPSG:{epsg_utm}",
+            resampleAlg="bilinear",
+            outputBounds=(bbox.west, bbox.south, bbox.east, bbox.north),
+            outputBoundsSRS="EPSG:4326",
+            dstNodata=-9999.0,
+            format="GTiff",
+        )
+        return {"path": out_path, "source_max_zoom": None, "dem_zoom": None,
+                "requested_zoom": None, "screen_zoom": zoom}
+
     # want_z = the resolution requested (screen zoom + multiplier); source_max = the
     # deepest zoom Mapterhorn serves here; z = the clamp (no upsampling past source).
     want_z = zoom + int(math.log2(resolution_multiplier))
