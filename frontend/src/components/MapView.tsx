@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Map, { Source, Layer, type MapRef } from "react-map-gl/maplibre";
+import Map, { Source, Layer, type MapRef, NavigationControl } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
 import type { StyleSpecification, Map as MlMap } from "maplibre-gl";
 import { cogProtocol, setColorFunction } from "@geomatico/maplibre-cog-protocol";
@@ -307,6 +307,7 @@ export function MapView({
       onMoveEnd={emitBounds}
       style={{ position: "absolute", inset: 0 }}
     >
+      <NavigationControl position="top-right" />
       {preview && (
         <Source id="preview" type="geojson" data={preview}>
           <Layer id="preview-line" type="line" paint={{ "line-color": "#ffffff", "line-width": 2, "line-dasharray": [2, 1] }} />

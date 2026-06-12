@@ -7,6 +7,16 @@ sessions, so dates are approximate; the ordering is chronological.
 `0.1.0` is the initial RiverREM Python-backend app. `1.0.0` introduces the pure-frontend
 (client-side JS) REM engine. Anything before `1.0.0` is server-only.
 
+## [1.3.1] — 2026-06-12
+
+### Fixed
+- **Symbology now round-trips to the server.** The styling snapshot (ramp, min/max, log,
+  reverse, transparent, hillshade, base, layer, sliders) is folded into `run.json` via the
+  existing `/thumb` debounce, and the gallery restores it instead of falling back to defaults.
+- **Edits to a loaded run no longer vanish.** Opening a run from the server gallery now adopts
+  it into local storage, so `updateRun` patches a real record rather than no-op'ing on an
+  unknown id (the cause of styling "sometimes" not saving).
+
 ## [1.3.0] — 2026-06-12
 
 ### Added

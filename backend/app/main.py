@@ -285,14 +285,17 @@ def save_thumb(req: ThumbRequest):
     os.makedirs(tdir, exist_ok=True)
     with open(os.path.join(tdir, f"{safe}.jpg"), "wb") as f:
         f.write(raw)
-    # Fold the resolved run name into the gallery sidecar, if one exists for this id.
-    if req.name:
+    # Fold the resolved run name + symbology snapshot into the gallery sidecar.
+    if req.name or req.symbology:
         rj = os.path.join(COG_DIR, safe, "run.json")
         if os.path.exists(rj):
             try:
                 with open(rj) as f:
                     meta = json.load(f)
-                meta["name"] = req.name
+                if req.name:
+                    meta["name"] = req.name
+                if req.symbology:
+                    meta["symbology"] = req.symbology
                 with open(rj, "w") as f:
                     json.dump(meta, f)
             except Exception:

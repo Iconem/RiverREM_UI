@@ -79,6 +79,7 @@ class ThumbRequest(BaseModel):
     id: str
     image: str  # data-URL or bare base64 JPEG
     name: str | None = None  # resolved run name → folded into run.json for /gallery
+    symbology: dict | None = None  # ramp/min/max/log/… snapshot → folded into run.json
 
 
 class ThumbResponse(BaseModel):

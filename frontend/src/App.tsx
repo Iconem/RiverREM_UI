@@ -63,17 +63,20 @@ export default function App() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [serverRuns, setServerRuns] = useState<Run[]>([]); // read-only /gallery (server runs)
   const [galleryOpen, setGalleryOpen] = useState(false);
-  const galleryItemToRun = useCallback((g: GalleryItem): Run => ({
-    id: g.id, cog: g.cog_url, dem: g.dem_url ?? null, bounds: g.bounds,
-    min: g.rem_min, max: Math.max(1, g.rem_max), log: true,
-    demMin: null, demMax: null, demLog: null,
-    ramp: "mako_r", reverse: false, transparent: "none" as const,
-    hillshade: "off" as const, base: "dark", layer: "rem" as const,
-    sliderLo: null, sliderHi: null, engine: "server" as const,
-    width: g.width ?? null, height: g.height ?? null, srcMaxZoom: null,
-    cl: g.centerline_url ?? null, name: g.name ?? g.river_name ?? null,
-    thumb: g.thumb ?? null, ts: g.ts ?? 0,
-  }), []);
+  const galleryItemToRun = useCallback((g: GalleryItem): Run => {
+    const s = (g.symbology ?? {}) as Record<string, any>;
+    return {
+      id: g.id, cog: g.cog_url, dem: g.dem_url ?? null, bounds: g.bounds,
+      min: s.min ?? g.rem_min, max: s.max ?? Math.max(1, g.rem_max), log: s.log ?? true,
+      demMin: s.demMin ?? null, demMax: s.demMax ?? null, demLog: s.demLog ?? null,
+      ramp: s.ramp ?? "mako_r", reverse: s.reverse ?? false, transparent: s.transparent ?? "none",
+      hillshade: s.hillshade ?? "off", base: s.base ?? "dark", layer: s.layer ?? "rem",
+      sliderLo: s.sliderLo ?? null, sliderHi: s.sliderHi ?? null, engine: "server" as const,
+      width: g.width ?? null, height: g.height ?? null, srcMaxZoom: null,
+      cl: g.centerline_url ?? null, name: g.name ?? g.river_name ?? null,
+      thumb: g.thumb ?? null, ts: g.ts ?? 0,
+    };
+  }, []);
   useEffect(() => {
     if (ui.runsSource !== "server") return;
     api.gallery().then(({ runs: gs }) => setServerRuns(gs.map(galleryItemToRun))).catch(() => setServerRuns([]));
@@ -129,10 +132,20 @@ export default function App() {
       if (!ctx) return;
       ctx.drawImage(src, 0, 0, w, h);
       const dataUrl = off.toDataURL("image/jpeg", 0.6);
-      const runName = listRuns().find((r) => r.id === runId)?.name ?? null;
+      const run = listRuns().find((r) => r.id === runId);
+      const runName = run?.name ?? null;
+      // The sync effect writes the current styling into the run before this 1.5s
+      // debounce fires, so localStorage holds the fresh snapshot to round-trip server-side.
+      const sym = run && {
+        ramp: run.ramp, reverse: run.reverse, transparent: run.transparent,
+        hillshade: run.hillshade, base: run.base, layer: run.layer,
+        min: run.min, max: run.max, log: run.log,
+        demMin: run.demMin, demMax: run.demMax, demLog: run.demLog,
+        sliderLo: run.sliderLo, sliderHi: run.sliderHi,
+      };
       // Store server-side (survives localStorage limits, shareable). Fall back to
       // the inline data-URL if the upload fails (e.g. offline dev).
-      api.thumb(runId, dataUrl, runName)
+      api.thumb(runId, dataUrl, runName, sym || null)
         .then(({ url }) => setRuns(updateRun(runId, { thumb: `${url}?v=${Date.now()}` })))
         .catch(() => setRuns(updateRun(runId, { thumb: dataUrl })));
     } catch { /* ignore (e.g. tainted canvas) */ }
@@ -407,6 +420,9 @@ export default function App() {
     setResult({ job_id: r.id, cog_url: r.cog, dem_url: r.dem, bounds: r.bounds, rem_min: r.min, rem_max: r.max, dem_min: demB?.min ?? null, dem_max: demB?.max ?? null, river_name: r.name ?? null, river_length_m: null, centerline_url: r.cl ?? null, width: r.width ?? null, height: r.height ?? null, source_max_zoom: r.srcMaxZoom ?? null });
     setActiveRem({ cog: r.cog, dem: r.dem || "", bounds: r.bounds });
     setActiveRunId(r.id); setRemVisible(true);
+    // Adopt the run into localStorage if it isn't already there (e.g. opened from the
+    // server gallery), so the sync effect can persist subsequent symbology edits.
+    if (!listRuns().some((x) => x.id === r.id)) setRuns(addRun(r, false));
     setRemBounds(remB); setDemBounds(demB);
     // Client runs: re-seed the sampled points so the rem:// source rebuilds offline.
     if (r.engine === "client" && r.clientPts?.length) {
