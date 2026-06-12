@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Map as MlMap } from "maplibre-gl";
 import { MapView } from "@/components/MapView";
 import { SidePanel } from "@/components/SidePanel";
 import { useMapView, useRemOptions, useActiveRem, useUiState } from "@/lib/state";
-import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit } from "@/lib/api";
+import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit, type GalleryItem } from "@/lib/api";
 import { fetchLongestRiver, mergeFeatureCollection } from "@/lib/osm";
 import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, type RiverPoint } from "@/lib/remClient";
 import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
+import GalleryModal from "@/components/GalleryModal";
 
 function download(blob: Blob, name: string) {
   const u = URL.createObjectURL(blob);
@@ -61,20 +62,39 @@ export default function App() {
   const [pct, setPct] = useState(0);
   const [runs, setRuns] = useState<Run[]>([]);
   const [serverRuns, setServerRuns] = useState<Run[]>([]); // read-only /gallery (server runs)
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const galleryItemToRun = useCallback((g: GalleryItem): Run => ({
+    id: g.id, cog: g.cog_url, dem: g.dem_url ?? null, bounds: g.bounds,
+    min: g.rem_min, max: Math.max(1, g.rem_max), log: true,
+    demMin: null, demMax: null, demLog: null,
+    ramp: "mako_r", reverse: false, transparent: "none" as const,
+    hillshade: "off" as const, base: "dark", layer: "rem" as const,
+    sliderLo: null, sliderHi: null, engine: "server" as const,
+    width: g.width ?? null, height: g.height ?? null, srcMaxZoom: null,
+    cl: g.centerline_url ?? null, name: g.name ?? g.river_name ?? null,
+    thumb: g.thumb ?? null, ts: g.ts ?? 0,
+  }), []);
   useEffect(() => {
     if (ui.runsSource !== "server") return;
-    api.gallery().then(({ runs: gs }) => setServerRuns(gs.map((g) => ({
-      id: g.id, cog: g.cog_url, dem: g.dem_url ?? null, bounds: g.bounds,
-      min: g.rem_min, max: Math.max(1, g.rem_max), log: true,
-      demMin: null, demMax: null, demLog: null,
-      ramp: "mako_r", reverse: false, transparent: "none" as const,
-      hillshade: "off" as const, base: "dark", layer: "rem" as const,
-      sliderLo: null, sliderHi: null, engine: "server" as const,
-      width: g.width ?? null, height: g.height ?? null, srcMaxZoom: null,
-      cl: g.centerline_url ?? null, name: g.river_name ?? null,
-      thumb: g.thumb ?? null, ts: g.ts ?? 0,
-    })))).catch(() => setServerRuns([]));
-  }, [ui.runsSource]);
+    api.gallery().then(({ runs: gs }) => setServerRuns(gs.map(galleryItemToRun))).catch(() => setServerRuns([]));
+  }, [ui.runsSource, galleryItemToRun]);
+
+  // Combined list for the gallery modal: device runs + server gallery, deduped by
+  // id (device wins — it carries the user's chosen symbology).
+  const galleryRuns = useMemo(() => {
+    const byId = new Map<string, Run>();
+    for (const r of serverRuns) byId.set(r.id, r);
+    for (const r of runs) byId.set(r.id, r);
+    return [...byId.values()];
+  }, [runs, serverRuns]);
+
+  const onOpenGallery = useCallback(async () => {
+    try {
+      const { runs: gs } = await api.gallery();
+      setServerRuns(gs.map(galleryItemToRun));
+    } catch { /* offline — show device runs only */ }
+    setGalleryOpen(true);
+  }, [galleryItemToRun]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [remVisible, setRemVisible] = useState(true);
   const [pickMode, setPickMode] = useState(false);
@@ -109,10 +129,11 @@ export default function App() {
       if (!ctx) return;
       ctx.drawImage(src, 0, 0, w, h);
       const dataUrl = off.toDataURL("image/jpeg", 0.6);
+      const runName = listRuns().find((r) => r.id === runId)?.name ?? null;
       // Store server-side (survives localStorage limits, shareable). Fall back to
       // the inline data-URL if the upload fails (e.g. offline dev).
-      api.thumb(runId, dataUrl)
-        .then(({ url }) => setRuns(updateRun(runId, { thumb: url })))
+      api.thumb(runId, dataUrl, runName)
+        .then(({ url }) => setRuns(updateRun(runId, { thumb: `${url}?v=${Date.now()}` })))
         .catch(() => setRuns(updateRun(runId, { thumb: dataUrl })));
     } catch { /* ignore (e.g. tainted canvas) */ }
   }, []);
@@ -543,6 +564,7 @@ export default function App() {
           previewInfo={centerInfo}
           runs={runs}
           serverRuns={serverRuns}
+          onOpenGallery={onOpenGallery}
           activeRunId={activeRunId}
           remVisible={remVisible}
           pickMode={pickMode}
@@ -571,6 +593,12 @@ export default function App() {
           onFlyTo={onFlyTo}
         />
       </div>
+      <GalleryModal
+        open={galleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        runs={galleryRuns}
+        onSelect={(r) => onLoadRun(r)}
+      />
     </div>
   );
 }

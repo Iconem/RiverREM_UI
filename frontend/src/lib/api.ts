@@ -28,6 +28,7 @@ export type GalleryItem = {
   river_name?: string | null;
   river_length_m?: number | null;
   centerline_url?: string | null;
+  name?: string | null;
   thumb?: string | null;
   ts?: number;
 };
@@ -116,7 +117,8 @@ export const api = {
   prune: (paths: string[]) => post<{ existing: string[] }>("/runs/prune", { paths }),
 
   // Persist a gallery thumbnail server-side; returns the hosted URL.
-  thumb: (id: string, image: string) => post<{ url: string }>("/thumb", { id, image }),
+  thumb: (id: string, image: string, name?: string | null) =>
+    post<{ url: string }>("/thumb", { id, image, name: name ?? null }),
 
   // Server-side gallery (run.json sidecars). Read-only list of past server computes.
   gallery: () => get<{ runs: GalleryItem[] }>("/gallery"),

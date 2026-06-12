@@ -7,6 +7,29 @@ sessions, so dates are approximate; the ordering is chronological.
 `0.1.0` is the initial RiverREM Python-backend app. `1.0.0` introduces the pure-frontend
 (client-side JS) REM engine. Anything before `1.0.0` is server-only.
 
+## [1.3.0] — 2026-06-12
+
+### Added
+- **Gallery modal** — an expand icon on the Runs header opens a centered overlay (SPA, no
+  route) with a **Featured** section (curated server runs) and **Most recent**, sortable
+  (recent / oldest / name) with grid and list views. Picking a run loads it into the sidebar
+  with its data + styling. Combines device runs and the server `/gallery`, deduped by id.
+- Server runs now fold their **resolved name** into `run.json` (piggybacked on the thumbnail
+  upload) so the gallery shows meaningful names.
+
+### Fixed
+- **Thumbnail re-capture now updates immediately** (cache-busted URL) instead of only after refresh.
+
+### Changed
+- Header subtitle → "River Relative Elevation Model".
+- Footer: "Automated by" (capital A).
+- IDW power: removed the info icon (label fits one line); the hover tooltip is now on the
+  number input.
+- Symbology panel: "Colour ramp" and "Layers style" subsection titles match the section
+  heading size; **Reverse** moved onto the Colour ramp title line; "Transparent" capitalised;
+  Relief overlay tabs widened to match the Basemap select.
+- Geocoder and DEM-COG-URL inputs use a smaller (0.75rem) font.
+
 ## [1.2.1] — 2026-06-12
 
 ### Fixed

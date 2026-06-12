@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Upload, Pencil, Waves, Play, Loader2, Download, Share2, Layers, Trash2, FileDown,
   Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, ChevronRight, Crosshair, ExternalLink,
-  List, LayoutGrid, ImageOff, Camera, Save, Sun, Moon, Info,
+  List, LayoutGrid, ImageOff, Camera, Save, Sun, Moon, Maximize2,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -78,7 +78,7 @@ export function SidePanel(p: {
   onExportRaw: () => void; onExportDem: () => void; onExportCenterline: () => void;
   onLoadRun: (r: Run) => void; onDeleteRun: (id: string) => void; onRenameRun: (id: string, name: string) => void;
   onRecaptureThumb: (id: string) => void;
-  onSaveSymbology: () => void;
+  onSaveSymbology: () => void; onOpenGallery: () => void;
   onToggleLayer: () => void; onTogglePick: () => void;
   onGeocode: (q: string) => void; onFlyTo: (lng: number, lat: number) => void;
 }) {
@@ -142,7 +142,7 @@ export function SidePanel(p: {
       <div className="flex items-start justify-between">
         <div>
           <div className="font-sans text-base font-semibold tracking-tight">River REM</div>
-          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">viewport · terrain → detrend → cog</div>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">River Relative Elevation Model</div>
         </div>
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setUi({ theme: ui.theme === "light" ? "dark" : "light" })} aria-label="toggle theme">
@@ -158,7 +158,7 @@ export function SidePanel(p: {
       <div className="relative">
         <div className="flex items-center gap-2">
           <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <Input placeholder="Search a place…" value={geoQ}
+          <Input className="text-xs" placeholder="Search a place…" value={geoQ}
             onChange={(e) => { setGeoQ(e.target.value); p.onGeocode(e.target.value); }} />
         </div>
         {p.geoHits.length > 0 && (
@@ -244,14 +244,9 @@ export function SidePanel(p: {
 
       <div className="grid grid-cols-[1fr_3fr] items-end gap-2">
         <div className="space-y-1">
-          <div className="flex h-4 items-center gap-1">
-            <Label>IDW power</Label>
-            <span title="Inverse-distance weighting exponent. OpenTopography/RiverREM uses 1; Dan Coe's original QGIS method uses 2. Higher = more local (closer samples dominate)."
-              className="inline-flex cursor-help" aria-label="IDW power help">
-              <Info className="h-3 w-3 text-muted-foreground" />
-            </span>
-          </div>
+          <div className="flex h-4 items-center"><Label>IDW power</Label></div>
           <Input type="number" step="0.5" min="0.5" max="4" value={opts.power}
+            title="Inverse-distance weighting exponent. OpenTopography/RiverREM uses 1; Dan Coe's original QGIS method uses 2. Higher = more local (closer samples dominate)."
             onChange={(e) => setOpts({ power: Math.max(0.5, Math.min(4, parseFloat(e.target.value) || 2)) })} />
         </div>
         {opts.engine === "client" ? (
@@ -277,7 +272,7 @@ export function SidePanel(p: {
       ) : (
         <div className="space-y-1">
           <Label>DEM COG URL (optional)</Label>
-          <Input value={p.demCogUrl} onChange={(e) => p.setDemCogUrl(e.target.value)} placeholder="https://…/dem.tif — overrides Mapterhorn" />
+          <Input className="text-xs" value={p.demCogUrl} onChange={(e) => p.setDemCogUrl(e.target.value)} placeholder="https://…/dem.tif — overrides Mapterhorn" />
         </div>
       )}
 
@@ -321,11 +316,13 @@ export function SidePanel(p: {
           )}
         </div>
         {!ui.foldRamp && (<>
-          <div className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">Colour ramp</div>
           <div className="space-y-2">
-            <div className="flex items-center justify-end gap-2">
-              <Label htmlFor="rev" className="cursor-pointer">Reverse</Label>
-              <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
+            <div className="flex items-center justify-between">
+              <Label>Colour ramp</Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="rev" className="cursor-pointer text-xs text-muted-foreground">Reverse</Label>
+                <Switch id="rev" checked={opts.reverse} onCheckedChange={(v) => setOpts({ reverse: v })} />
+              </div>
             </div>
             <Select value={opts.ramp} onValueChange={(v) => setOpts({ ramp: v as Opts["ramp"] })}>
               <SelectTrigger>
@@ -384,7 +381,7 @@ export function SidePanel(p: {
           />
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
-              <span className="font-mono text-[10px] text-muted-foreground">transparent</span>
+              <span className="font-mono text-[10px] text-muted-foreground">Transparent</span>
               <Tabs value={opts.transparent} onValueChange={(v) => setOpts({ transparent: v as Opts["transparent"] })}>
                 <TabsList className="w-auto">
                   <TabsTrigger value="none" className="px-1.5">None</TabsTrigger>
@@ -400,7 +397,7 @@ export function SidePanel(p: {
           </div>
 
           <Separator />
-          <div className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">Layers style</div>
+          <Label>Layers style</Label>
           <div className="flex items-center justify-between">
             <Label>Basemap</Label>
             <div className="w-44">
@@ -419,10 +416,10 @@ export function SidePanel(p: {
           <div className="flex items-center justify-between">
             <Label>Relief overlay</Label>
             <Tabs value={opts.hillshade} onValueChange={(v) => setOpts({ hillshade: v as Opts["hillshade"] })}>
-              <TabsList className="w-auto">
-                <TabsTrigger value="off" className="px-2">Off</TabsTrigger>
-                <TabsTrigger value="dark" className="px-2">Dark</TabsTrigger>
-                <TabsTrigger value="light" className="px-2">Light</TabsTrigger>
+              <TabsList className="grid w-44 grid-cols-3">
+                <TabsTrigger value="off">Off</TabsTrigger>
+                <TabsTrigger value="dark">Dark</TabsTrigger>
+                <TabsTrigger value="light">Light</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -534,6 +531,11 @@ export function SidePanel(p: {
                     </button>
                   ))}
                 </div>
+                <button onClick={p.onOpenGallery} aria-label="open gallery"
+                  title="Open gallery"
+                  className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
             {isServer && list.length === 0 && (
@@ -644,7 +646,7 @@ export function SidePanel(p: {
           REM method:{" "}
           <a className="underline" href="https://dancoecarto.com/creating-rems-in-qgis-the-idw-method" target="_blank" rel="noreferrer">Dan Coe — IDW</a>
           <br />
-          automated by{" "}
+          Automated by{" "}
           <a className="underline" href="https://opentopography.org/blog/new-package-automates-river-relative-elevation-model-rem-generation" target="_blank" rel="noreferrer">OpenTopography RiverREM</a>{" "}
           (<a className="underline" href="https://github.com/OpenTopography/RiverREM" target="_blank" rel="noreferrer">repo</a>).
         </p>

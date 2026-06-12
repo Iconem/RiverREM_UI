@@ -78,6 +78,7 @@ class PruneResponse(BaseModel):
 class ThumbRequest(BaseModel):
     id: str
     image: str  # data-URL or bare base64 JPEG
+    name: str | None = None  # resolved run name → folded into run.json for /gallery
 
 
 class ThumbResponse(BaseModel):

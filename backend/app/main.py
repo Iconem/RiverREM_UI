@@ -285,6 +285,18 @@ def save_thumb(req: ThumbRequest):
     os.makedirs(tdir, exist_ok=True)
     with open(os.path.join(tdir, f"{safe}.jpg"), "wb") as f:
         f.write(raw)
+    # Fold the resolved run name into the gallery sidecar, if one exists for this id.
+    if req.name:
+        rj = os.path.join(COG_DIR, safe, "run.json")
+        if os.path.exists(rj):
+            try:
+                with open(rj) as f:
+                    meta = json.load(f)
+                meta["name"] = req.name
+                with open(rj, "w") as f:
+                    json.dump(meta, f)
+            except Exception:
+                pass
     return ThumbResponse(url=f"{PUBLIC_BASE}/cogs/thumbs/{safe}.jpg")
 
 
