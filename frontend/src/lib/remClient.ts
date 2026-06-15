@@ -228,35 +228,12 @@ function idwValue(qMx: number, qMy: number): number {
   return sw > 0 ? swz / sw : 0;
 }
 
-// ── Pre-computed WSE grid (eliminates IDW bull's-eye + inter-zoom DEM inconsistency) ──
-// IDW is evaluated once on a coarse grid, then blurred and bilinearly interpolated
-// at tile-render time. This produces a smooth WSE field with no per-point artifacts.
+// ── Pre-computed WSE grid (eliminates inter-zoom DEM inconsistency) ──
+// IDW is evaluated once on a coarse grid and bilinearly interpolated at tile-render time.
 type WseGrid = { data: Float32Array; w: number; h: number; mx0: number; my0: number; mx1: number; my1: number };
 let wseGrid: WseGrid | null = null;
 
 const GRID_SZ = 256;
-
-function boxBlur1d(src: Float32Array, w: number, h: number, r: number, horizontal: boolean): Float32Array {
-  const out = new Float32Array(src.length);
-  if (horizontal) {
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        let sum = 0;
-        for (let d = -r; d <= r; d++) sum += src[y * w + Math.min(w - 1, Math.max(0, x + d))];
-        out[y * w + x] = sum / (2 * r + 1);
-      }
-    }
-  } else {
-    for (let x = 0; x < w; x++) {
-      for (let y = 0; y < h; y++) {
-        let sum = 0;
-        for (let d = -r; d <= r; d++) sum += src[Math.min(h - 1, Math.max(0, y + d)) * w + x];
-        out[y * w + x] = sum / (2 * r + 1);
-      }
-    }
-  }
-  return out;
-}
 
 function buildWseGrid(pts: RiverPoint[]): WseGrid | null {
   if (pts.length === 0) return null;
@@ -273,13 +250,7 @@ function buildWseGrid(pts: RiverPoint[]): WseGrid | null {
       raw[yi * w + xi] = idwValue(mx, my);
     }
   }
-  // Three-pass box blur ≈ Gaussian with radius 4 — smooths IDW bull's-eyes at ~4× cell spacing.
-  const r = 4;
-  let blurred = boxBlur1d(raw, w, h, r, true);
-  blurred = boxBlur1d(blurred, w, h, r, false);
-  blurred = boxBlur1d(blurred, w, h, r, true);
-  blurred = boxBlur1d(blurred, w, h, r, false);
-  return { data: blurred, w, h, mx0, my0, mx1, my1 };
+  return { data: raw, w, h, mx0, my0, mx1, my1 };
 }
 
 function sampleWse(mx: number, my: number): number {
