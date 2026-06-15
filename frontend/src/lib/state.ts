@@ -4,6 +4,7 @@
  * reproduces the exact view and styling.
  */
 import {
+  createParser,
   parseAsFloat,
   parseAsInteger,
   parseAsBoolean,
@@ -12,6 +13,14 @@ import {
   parseAsArrayOf,
   useQueryStates,
 } from "nuqs";
+
+// Float parser that serialises to a fixed number of decimals — keeps the URL short
+// and avoids 14-digit floats. 5 dp ≈ 1 m of latitude/longitude precision.
+const parseAsFixed = (decimals: number) =>
+  createParser({
+    parse: (v: string) => { const n = parseFloat(v); return Number.isNaN(n) ? null : n; },
+    serialize: (v: number) => String(Number(v.toFixed(decimals))),
+  });
 
 export const RAMP_NAMES = [
   "mako_r", "blues_r", "gray", "viridis", "spectral", "topo",
@@ -23,16 +32,16 @@ export function useMapView() {
   return useQueryStates({
     // Willamette River meanders near Corvallis, OR — clear floodplain channels,
     // good Mapterhorn coverage, REM reads nicely here.
-    lng: parseAsFloat.withDefault(-123.25),
-    lat: parseAsFloat.withDefault(44.57),
-    zoom: parseAsFloat.withDefault(13),
+    lng: parseAsFixed(5).withDefault(-123.25),
+    lat: parseAsFixed(5).withDefault(44.57),
+    zoom: parseAsFixed(2).withDefault(13),
   });
 }
 
 export function useRemOptions() {
   return useQueryStates({
     mode: parseAsStringEnum(["osm", "geojson", "shapefile"]).withDefault("osm"),
-    engine: parseAsStringEnum(["server", "client"]).withDefault("server"), // server=RiverREM COG, client=pure-JS live tiles
+    engine: parseAsStringEnum(["server", "client"]).withDefault("client"), // server=RiverREM COG, client=pure-JS live tiles
     power: parseAsFloat.withDefault(2), // IDW power (both engines)
     samples: parseAsInteger.withDefault(150), // river WSE sample count (client engine)
     base: parseAsStringEnum([...BASEMAPS]).withDefault("dark"),
@@ -49,8 +58,9 @@ export function useRemOptions() {
     sliderLo: parseAsFloat, // optional custom slider lower bound (null = auto)
     sliderHi: parseAsFloat, // optional custom slider upper bound (null = auto)
     osm: parseAsString.withDefault("https://qlever.dev/api/osm-planet"),
-    qleverMode: parseAsStringEnum(["longest", "all"]).withDefault("longest"),
+    qleverMode: parseAsStringEnum(["longest", "all", "waterways"]).withDefault("longest"),
     showContours: parseAsBoolean.withDefault(false),
+    showContourLabels: parseAsBoolean.withDefault(true),
     showRiver: parseAsBoolean.withDefault(true),
     showSamples: parseAsBoolean.withDefault(false),
     showViewport: parseAsBoolean.withDefault(false),
@@ -63,7 +73,7 @@ export function useActiveRem() {
   return useQueryStates({
     cog: parseAsString.withDefault(""),
     dem: parseAsString.withDefault(""),
-    bounds: parseAsArrayOf(parseAsFloat).withDefault([]),
+    bounds: parseAsArrayOf(parseAsFixed(5)).withDefault([]),
   });
 }
 
@@ -73,6 +83,7 @@ export function useUiState() {
   return useQueryStates({
     foldCl: parseAsBoolean.withDefault(true), // centerline options folded by default
     foldRamp: parseAsBoolean.withDefault(false),
+    foldLayers: parseAsBoolean.withDefault(false), // layers (basemap/relief/chips) section
     foldUtil: parseAsBoolean.withDefault(true), // utilities (basemap/inspect/load) folded
     collapsed: parseAsBoolean.withDefault(false), // whole panel collapsed
     runsView: parseAsStringEnum(["list", "gallery"]).withDefault("gallery"),

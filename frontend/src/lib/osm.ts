@@ -190,6 +190,50 @@ function wktToFeatures(name: string, wkt: string): NamedLine[] {
   return out;
 }
 
+/** Fetch ALL waterways in the bbox regardless of name (includes unnamed streams). */
+async function fetchQleverAll(bbox: BBox, endpoint: string): Promise<NamedLine[]> {
+  const poly =
+    `POLYGON((${bbox.west} ${bbox.south},${bbox.east} ${bbox.south},` +
+    `${bbox.east} ${bbox.north},${bbox.west} ${bbox.north},${bbox.west} ${bbox.south}))`;
+  const sparql = `
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX osmkey: <https://www.openstreetmap.org/wiki/Key:>
+PREFIX spatialSearch: <https://qlever.cs.uni-freiburg.de/spatialSearch/>
+SELECT ?name ?wkt WHERE {
+  BIND("${poly}"^^geo:wktLiteral AS ?area)
+  SERVICE spatialSearch: {
+    _:config spatialSearch:algorithm spatialSearch:libspatialjoin ;
+             spatialSearch:joinType spatialSearch:intersects ;
+             spatialSearch:left ?area ;
+             spatialSearch:right ?wkt ;
+             spatialSearch:payload ?name .
+    {
+      ?osm osmkey:waterway ?ww .
+      OPTIONAL { ?osm osmkey:name ?n . }
+      BIND(COALESCE(?n, "unnamed") AS ?name)
+      ?osm geo:hasGeometry/geo:asWKT ?wkt .
+      FILTER(?ww = "river" || ?ww = "stream" || ?ww = "tidal_channel" || ?ww = "canal" || ?ww = "drain")
+    }
+  }
+} LIMIT 5000`;
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/sparql-results+json" },
+    body: "query=" + encodeURIComponent(sparql),
+  });
+  if (!res.ok) throw new Error(`QLever ${res.status}`);
+  const json = await res.json();
+  const rows = json?.results?.bindings ?? [];
+  const feats: NamedLine[] = [];
+  for (const r of rows) {
+    const name = r.name?.value ?? "unnamed";
+    const wkt = (r.wkt?.value ?? "").replace(/^<[^>]*>\s*/, "");
+    if (wkt) feats.push(...wktToFeatures(name, wkt));
+  }
+  if (feats.length === 0) throw new Error("QLever returned no waterways");
+  return feats;
+}
+
 async function fetchQlever(bbox: BBox, endpoint: string): Promise<NamedLine[]> {
   const poly =
     `POLYGON((${bbox.west} ${bbox.south},${bbox.east} ${bbox.south},` +
@@ -234,6 +278,16 @@ SELECT ?name ?wkt WHERE {
   }
   if (feats.length === 0) throw new Error("QLever returned no waterways");
   return feats;
+}
+
+/** Fetch all waterways (named + unnamed) as a single merged FeatureCollection. Qlever only. */
+export async function fetchAllWaterways(bbox: BBox, endpoint: string): Promise<{ geojson: GeoJSON.FeatureCollection; count: number }> {
+  const feats = await fetchQleverAll(bbox, endpoint);
+  const fc: GeoJSON.FeatureCollection = {
+    type: "FeatureCollection",
+    features: feats,
+  };
+  return { geojson: fc, count: feats.length };
 }
 
 export async function fetchLongestRiver(bbox: BBox, endpoint?: string): Promise<RiverResult> {

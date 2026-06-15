@@ -7,6 +7,75 @@ sessions, so dates are approximate; the ordering is chronological.
 `0.1.0` is the initial RiverREM Python-backend app. `1.0.0` introduces the pure-frontend
 (client-side JS) REM engine. Anything before `1.0.0` is server-only.
 
+## [1.4.0] — 2026-06-16
+
+### Fixed
+- **Contour speckle / ring artifacts in the client engine — root-caused and eliminated.**
+  The terrarium elevation bytes were being corrupted by browser colour management on
+  both ends of the tile pipeline:
+  - **Input:** Mapterhorn WebP tiles were decoded through a 2D canvas
+    (`createImageBitmap` → `drawImage` → `getImageData`), which applies the canvas
+    colour space / premultiplied-alpha rounding and shifted the G/B channels by ±1
+    (≈ ±1 m noise). Now decoded with **WebCodecs `ImageDecoder`** straight to raw RGBA —
+    no canvas, no colour management — matching what GDAL/QGIS read byte-for-byte.
+  - **Output:** `canvas.convertToBlob` tagged the `rem://` PNG as sRGB, so maplibre's
+    raster-dem worker re-gamma-corrected the bytes on decode and reintroduced the speckle.
+    Output tiles are now written with **`fast-png`** (only IHDR/IDAT/IEND — no sRGB, gAMA,
+    or iCCP) at zlib level 0 (no compression), so they decode raw like any terrarium tile.
+  - The same two fixes were applied to the **beta pure-client GPU page**
+    (`rem-pure-frontend.html`): WebCodecs decode in, `fast-png` out.
+- **Client-engine DEM-mode min/max bounds were unset (0–0).** With no server response, DEM
+  mode had no min/max; now sampled from a viewport DEM grid (5th / 95th percentile) so the
+  ramp is sensible immediately.
+- **`fetchAllWaterways` crash** (referenced a non-existent `.geojson` field on the line
+  features) — now builds the FeatureCollection correctly.
+- **REM contours now toggle on/off repeatedly.** maplibre-contour's `worker: false` path
+  returned its *cached* vector-tile buffer directly; maplibre transfers (detaches) it, so a
+  cache hit on re-request threw `DataCloneError: ArrayBuffer … already detached`. The REM
+  contour `DemSource` now uses `cacheSize: 0` (fresh buffer per request); the DEM path keeps
+  its cache (the worker path clones before transfer).
+- **Contours no longer get stuck off / rebuild on every toggle.** The source + layers are
+  built once when a run exists and kept alive; a dedicated effect only flips `visibility`.
+  This removed the teardown/rebuild churn and the detach errors it caused.
+- **No more stale contours on reload** when no run is selected (the `showContours` URL flag
+  no longer draws raw-DEM contours without an active run).
+- **Mapterhorn over-zoom 404s.** Every Mapterhorn-based source (the `rem://` raster-dem, the
+  contour `DemSource`, and the hillshade/relief source) is now capped at the probed deepest
+  available zoom, and `buildREMTile` overzoom-samples from the parent tile instead of
+  requesting tiles past coverage.
+- The `rem://` tile cache hands out copies (the cached original survives the worker transfer).
+
+### Added
+- **"All waterways (incl. unnamed)" centerline mode** (QLever) — fetches every waterway in
+  view (river / stream / canal / drain / tidal_channel), named or not, via a SPARQL spatial
+  join, in addition to the existing "longest named river" and "all named rivers" modes.
+- **`debugTile(z, x, y)` single-tile diagnostic** (`window.__debugTile`) — runs the REM
+  pipeline on one tile and downloads georeferenced intermediates for QGIS: float32 GeoTIFFs
+  of DEM / WSE / REM (raw metres, EPSG:4326, via a hand-built minimal GeoTIFF encoder),
+  terrarium-encoded DEM/REM PNGs, and a per-pixel CSV.
+- **Dedicated "Layers" section** (foldable) split out of Symbology — basemap, relief overlay,
+  and the layer-visibility chips, with its own URL fold state.
+- **"Contour Labels" visibility chip** (between Contours and the REM/DEM Output chip),
+  toggling the major-contour elevation labels independently of the contour lines.
+- **On-map pick tooltip** — a themed popup at the picked point showing REM, DEM, and lat/lon
+  (in addition to the sidebar readout); dark in dark mode, no arrow tip.
+- `fast-png` dependency (metadata-free PNG output).
+
+### Changed
+- **Default compute engine is now Client** (pure-JS live tiles) instead of Server.
+- River mode option 2 renamed **"All named rivers"**.
+- **DEM-mode contours** use 5 / 25 m (minor / major); major contours are labelled and the
+  label font is slightly larger.
+- River centerline drawn with larger, equal-length dashes (`[4, 4]`).
+- "Hillshade Overlay" chip renamed **"Hillshade"**.
+- **Debounced max-zoom probe on map move** — the deepest available Mapterhorn zoom is
+  re-probed for the view centre as you pan/zoom and applied to all Mapterhorn sources.
+- **Shorter URLs:** map `lat`/`lng` serialise to 5 decimals (~1 m), `zoom` to 2, and run
+  `bounds` to 5, via a fixed-precision nuqs parser.
+- **Recompute now drives the layer chips progressively** — viewport → centerline →
+  river samples → REM/DEM + contours are enabled in sequence, and the previous result is
+  cleared up front so stale layers don't linger.
+
 ## [1.3.1] — 2026-06-12
 
 ### Fixed

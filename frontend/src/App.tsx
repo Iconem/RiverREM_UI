@@ -4,8 +4,8 @@ import { MapView } from "@/components/MapView";
 import { SidePanel } from "@/components/SidePanel";
 import { useMapView, useRemOptions, useActiveRem, useUiState } from "@/lib/state";
 import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit, type GalleryItem } from "@/lib/api";
-import { fetchLongestRiver, fetchAllRivers, mergeFeatureCollection } from "@/lib/osm";
-import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, sampleAt, type RiverPoint } from "@/lib/remClient";
+import { fetchLongestRiver, fetchAllRivers, fetchAllWaterways, mergeFeatureCollection } from "@/lib/osm";
+import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, sampleAt, sampleDemBounds, type RiverPoint } from "@/lib/remClient";
 import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
 import GalleryModal from "@/components/GalleryModal";
 
@@ -143,8 +143,20 @@ export default function App() {
 
   const bboxRef = useRef<{ bbox: BBox; zoom: number } | null>(null);
   const mapRef = useRef<MlMap | null>(null);
-  const onBounds = useCallback((bbox: BBox, zoom: number) => { bboxRef.current = { bbox, zoom }; }, []);
+  const terradrawRef = useRef<any>(null);
+  const probeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onBounds = useCallback((bbox: BBox, zoom: number) => {
+    bboxRef.current = { bbox, zoom };
+    // Debounced: re-probe the deepest available Mapterhorn zoom for the view centre,
+    // so every Mapterhorn-based source (rem://, contours, hillshade) caps at coverage.
+    if (probeTimer.current) clearTimeout(probeTimer.current);
+    probeTimer.current = setTimeout(async () => {
+      const cx = (bbox.west + bbox.east) / 2, cy = (bbox.south + bbox.north) / 2;
+      try { setClientMaxZoom(await probeMaxZoom(cx, cy)); } catch { /* keep current */ }
+    }, 600);
+  }, []);
   const onMapReady = useCallback((m: MlMap) => { mapRef.current = m; }, []);
+  const onTerraDrawRef = useCallback((draw: any | null) => { terradrawRef.current = draw; }, []);
 
   // Grab a small JPEG of the current map for the runs gallery. Waits for the COG
   // to finish rendering (map "idle") before drawing the canvas down to 360px wide.
@@ -299,10 +311,15 @@ export default function App() {
     if (!bboxRef.current) return;
     // Clear any loaded layer so the new preview is unambiguous.
     setResult(null); setRiverPoints(null); setActiveRunId(null);
+    setOpts({ showContours: false, showSamples: false });
     setBusy(true);
     try {
       const bbox = bboxRef.current.bbox;
-      if (opts.qleverMode === "all" && opts.osm.includes("qlever")) {
+      if (opts.qleverMode === "waterways" && opts.osm.includes("qlever")) {
+        const { geojson, count } = await fetchAllWaterways(bbox, opts.osm);
+        setCenterline(geojson);
+        setCenterInfo({ river_name: `${count} waterways`, river_length_m: 0 });
+      } else if (opts.qleverMode === "all" && opts.osm.includes("qlever")) {
         const rivers = await fetchAllRivers(bbox, opts.osm);
         if (rivers.length === 0) throw new Error("No rivers found");
         const allFeatures = rivers.flatMap((r) => (r.geojson as GeoJSON.FeatureCollection).features);
@@ -328,28 +345,76 @@ export default function App() {
   const onImport = useCallback(async (f: File) => {
     setBusy(true);
     try {
-      const parsed = JSON.parse(await f.text()) as GeoJSON.GeoJSON;
+      const text = await f.text();
+      console.log("[import] raw text length:", text.length, "file:", f.name);
+      const parsed = JSON.parse(text) as GeoJSON.GeoJSON;
+      console.log("[import] parsed type:", parsed.type);
+
       const fc: GeoJSON.FeatureCollection =
         parsed.type === "FeatureCollection" ? parsed :
         parsed.type === "Feature" ? { type: "FeatureCollection", features: [parsed as GeoJSON.Feature] } :
         { type: "FeatureCollection", features: [] };
-      setCenterline(fc);
-      setUploadId(null); setCenterInfo(null); setOpts({ mode: "geojson" });
-      // Fly to the imported geometry's extent.
+
+      const lineFeatures = fc.features.filter(
+        (f) => f.geometry?.type === "LineString" || f.geometry?.type === "MultiLineString",
+      );
+      console.log("[import] total features:", fc.features.length, "| line features:", lineFeatures.length,
+        lineFeatures.map((f) => `${f.geometry.type}(${f.geometry.type === "LineString" ? (f.geometry as GeoJSON.LineString).coordinates.length : "multi"} pts)`));
+
+      // Collect all coordinates for bbox calculation.
       const coords: number[][] = [];
-      for (const feat of fc.features) {
+      for (const feat of lineFeatures) {
         const g = feat.geometry;
-        if (g?.type === "LineString") coords.push(...g.coordinates);
-        else if (g?.type === "MultiLineString") for (const ls of g.coordinates) coords.push(...ls);
+        if (g.type === "LineString") coords.push(...g.coordinates);
+        else if (g.type === "MultiLineString") for (const ls of g.coordinates) coords.push(...ls);
       }
+
+      // Load into terra-draw so it owns the geometry and draws it on the map.
+      // Falls back to plain preview-line if terra-draw is not yet ready.
+      const draw = terradrawRef.current;
+      if (draw) {
+        try {
+          draw.clear();
+          const tdFeatures = lineFeatures.map((feat) => ({
+            ...feat,
+            id: crypto.randomUUID(),
+            properties: { ...(feat.properties ?? {}), mode: "linestring" },
+          }));
+          const results = draw.addFeatures(tdFeatures);
+          console.log("[import] terra-draw addFeatures results:", results);
+          const snapshot: GeoJSON.Feature[] = draw.getSnapshot();
+          console.log("[import] terra-draw snapshot after add:", snapshot.length, "features");
+          const importedFc: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: snapshot };
+          setCenterline(importedFc);
+        } catch (err) {
+          console.warn("[import] terra-draw addFeatures failed, falling back to plain preview:", err);
+          setCenterline(fc);
+        }
+      } else {
+        console.warn("[import] terra-draw not ready, using plain preview-line");
+        setCenterline(fc);
+      }
+
+      setUploadId(null);
+      setCenterInfo(null);
+      setOpts({ mode: "geojson" });
+
+      // Fit map to the imported geometry.
       if (coords.length > 0 && mapRef.current) {
-        const lngs = coords.map((c) => c[0]), lats = coords.map((c) => c[1]);
-        mapRef.current.fitBounds(
-          [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)] as [number, number, number, number],
-          { padding: 60, duration: 600, maxZoom: 14 },
-        );
+        const lngs = coords.map((c) => c[0]);
+        const lats = coords.map((c) => c[1]);
+        const bounds: [number, number, number, number] = [
+          Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats),
+        ];
+        console.log("[import] fitting map to bounds:", bounds);
+        mapRef.current.fitBounds(bounds, { padding: 60, duration: 600, maxZoom: 14 });
+      } else {
+        console.warn("[import] no coordinates found for fitBounds");
       }
-    } catch (e) { alert(`Import failed: ${(e as Error).message}`); }
+    } catch (e) {
+      console.error("[import] failed:", e);
+      alert(`Import failed: ${(e as Error).message}`);
+    }
     finally { setBusy(false); }
   }, [setOpts]);
 
@@ -408,14 +473,23 @@ export default function App() {
 
     // ── CLIENT ENGINE: sample the river + build REM tiles live in the browser ──
     if (opts.engine === "client") {
+      // Clear previous result + disable derived chips so stale data never shows during recompute.
+      setResult(null); setRiverPoints(null);
+      setOpts({ showContours: false, showSamples: false, showViewport: true, showRiver: true });
       setBusy(true); setRemVisible(true); setResNote(null); setPhase("Finding river"); setPct(10);
       try {
         let cl = centerline;
         if (opts.mode !== "shapefile" && !cl) {
-          const r = await fetchLongestRiver(bboxRef.current.bbox, opts.osm);
-          const cropped = cropCenterline(r.geojson, bboxRef.current.bbox, 0.1) ?? r.geojson;
-          cl = cropped; setCenterline(cropped);
-          setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
+          if (opts.qleverMode === "waterways" && opts.osm.includes("qlever")) {
+            const { geojson, count } = await fetchAllWaterways(bboxRef.current.bbox, opts.osm);
+            cl = geojson; setCenterline(geojson);
+            setCenterInfo({ river_name: `${count} waterways`, river_length_m: 0 });
+          } else {
+            const r = await fetchLongestRiver(bboxRef.current.bbox, opts.osm);
+            const cropped = cropCenterline(r.geojson, bboxRef.current.bbox, 0.1) ?? r.geojson;
+            cl = cropped; setCenterline(cropped);
+            setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
+          }
         }
         setPhase("Sampling river"); setPct(45);
         const z = bboxRef.current.zoom;
@@ -426,19 +500,24 @@ export default function App() {
         const demZoom = Math.min(maxZ, Math.max(10, Math.round(z) + 1));
         const pts = await sampleRiverPoints(cl, demZoom, Math.max(10, Math.min(1000, opts.samples)));
         if (pts.length === 0) throw new Error("No river elevations sampled in view");
-        setPhase("Building tiles"); setPct(80);
+        setOpts({ showSamples: true });
+        setPhase("Building tiles"); setPct(75);
+        // Sample a viewport DEM grid to compute 5th/95th percentile for DEM mode bounds.
+        const demGrid = await sampleDemBounds(bboxRef.current.bbox, demZoom);
+        const demB: Bounds | null = demGrid ? { min: demGrid.min, max: demGrid.max, log: false } : null;
         setRiverPoints(pts); setRemParams(pts, opts.power); setRemToken((n) => n + 1);
+        setPct(90);
         const bb = bboxRef.current.bbox;
         const bounds: [number, number, number, number] = [bb.west, bb.south, bb.east, bb.north];
         const remB: Bounds = { min: -1, max: 10, log: true };
-        setRemBounds(remB); setDemBounds(null);
+        setRemBounds(remB); setDemBounds(demB);
         setResult({
           job_id: "client", cog_url: "", dem_url: null, bounds,
           rem_min: -1, rem_max: 10, river_name: centerInfo?.river_name ?? null,
           river_length_m: centerInfo?.river_length_m ?? null,
           source_max_zoom: maxZ,
         } as ComputeResponse);
-        setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
+        setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem", showContours: true, showViewport: false });
         const id = await recordClientRun(bounds, pts, remB, maxZ, cl);
         setFitSignal((n) => n + 1);
         captureThumb(id);
@@ -447,14 +526,22 @@ export default function App() {
       return;
     }
 
+    setResult(null); setRiverPoints(null);
+    setOpts({ showContours: false, showSamples: false, showViewport: true, showRiver: true });
     setBusy(true); setRemVisible(true); setResNote(null); setPhase("Finding river"); setPct(8);
     try {
       let cl = centerline;
       if (opts.mode !== "shapefile" && !cl) {
-        const r = await fetchLongestRiver(bboxRef.current.bbox, opts.osm);
-        const cropped = cropCenterline(r.geojson, bboxRef.current.bbox, 0.1) ?? r.geojson;
-        cl = cropped; setCenterline(cropped);
-        setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
+        if (opts.qleverMode === "waterways" && opts.osm.includes("qlever")) {
+          const { geojson, count } = await fetchAllWaterways(bboxRef.current.bbox, opts.osm);
+          cl = geojson; setCenterline(geojson);
+          setCenterInfo({ river_name: `${count} waterways`, river_length_m: 0 });
+        } else {
+          const r = await fetchLongestRiver(bboxRef.current.bbox, opts.osm);
+          const cropped = cropCenterline(r.geojson, bboxRef.current.bbox, 0.1) ?? r.geojson;
+          cl = cropped; setCenterline(cropped);
+          setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
+        }
       }
       const usingShp = opts.mode === "shapefile" && uploadId;
       const res = await api.compute(
@@ -472,7 +559,7 @@ export default function App() {
       const demB: Bounds | null = res.dem_min != null && res.dem_max != null
         ? { min: Math.floor(res.dem_min), max: Math.ceil(res.dem_max), log: false } : null;
       setRemBounds(remB); setDemBounds(demB);
-      setResult(res); setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem" });
+      setResult(res); setOpts({ min: remB.min, max: remB.max, log: remB.log, layer: "rem", showContours: true, showViewport: false });
       if (!cl && res.centerline_url) { const g = await api.centerline(res.centerline_url); if (g) setCenterline(g); }
       setResNote(resolutionNote(res, bboxRef.current.zoom, opts.res));
       const id = await recordRun(res, remB, demB);
@@ -654,6 +741,7 @@ export default function App() {
         preview={result ? null : centerline}
         riverGeojson={result ? centerline : null}
         showContours={opts.showContours}
+        showContourLabels={opts.showContourLabels}
         isDemMode={layer === "dem"}
         showRiver={opts.showRiver}
         showSamples={opts.showSamples}
@@ -665,11 +753,13 @@ export default function App() {
         remToken={remToken}
         remVisible={remVisible}
         pickMode={pickMode}
+        pick={pick}
         onBounds={onBounds}
         onView={setView}
         onDrawn={onDrawn}
         onMapReady={onMapReady}
         onPick={onPick}
+        onTerraDrawRef={onTerraDrawRef}
       />
       <div className="pointer-events-none absolute inset-0">
         <SidePanel

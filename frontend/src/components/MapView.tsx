@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Map, { type MapRef, NavigationControl } from "react-map-gl/maplibre";
+import Map, { type MapRef, NavigationControl, Popup } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
 import mlcontour from "maplibre-contour";
 import type { StyleSpecification, Map as MlMap } from "maplibre-gl";
 import { cogProtocol, setColorFunction } from "@geomatico/maplibre-cog-protocol";
 import { colorReliefExpr } from "@/lib/colormap";
-import { ensureRemProtocol, setRemParams, buildREMTile, type RiverPoint } from "@/lib/remClient";
+import { ensureRemProtocol, setRemParams, buildREMTile, setRemMaxZoom, type RiverPoint } from "@/lib/remClient";
 
 // Patch window.fetch so maplibre-contour (worker:false) can resolve rem:// tile URLs.
 // addProtocol registrations are MapLibre-internal and invisible to external fetch().
@@ -73,7 +73,7 @@ const STYLE: StyleSpecification = {
       tileSize: 256, attribution: "© Esri, Maxar, Earthstar Geographics",
     },
     "mapterhorn-dem": {
-      type: "raster-dem", tiles: [MAPTERHORN_DEM], tileSize: 256,
+      type: "raster-dem", tiles: [MAPTERHORN_DEM], tileSize: 256, maxzoom: 14,
       encoding: "terrarium", attribution: "terrain © Mapterhorn",
     },
   },
@@ -108,8 +108,8 @@ type Opts = { ramp: string; min: number; max: number; mode: string; base: string
 export function MapView({
   initialView, opts, cogUrl, cogBounds, fitSignal, theme, preview, remVisible, pickMode,
   engine, riverPoints, idwPower, clientMaxZoom, remToken,
-  riverGeojson, showContours, isDemMode, showRiver, showSamples, showViewport,
-  onBounds, onView, onDrawn, onMapReady, onPick,
+  riverGeojson, showContours, showContourLabels, isDemMode, showRiver, showSamples, showViewport, pick,
+  onBounds, onView, onDrawn, onMapReady, onPick, onTerraDrawRef,
 }: {
   initialView: { lng: number; lat: number; zoom: number };
   opts: Opts;
@@ -120,6 +120,7 @@ export function MapView({
   preview: GeoJSON.GeoJSON | null;
   riverGeojson: GeoJSON.GeoJSON | null;
   showContours: boolean;
+  showContourLabels: boolean;
   isDemMode: boolean;
   showRiver: boolean;
   showSamples: boolean;
@@ -131,11 +132,13 @@ export function MapView({
   remToken: number;
   remVisible: boolean;
   pickMode: boolean;
+  pick: { lng: number; lat: number; rem: number | null; dem: number | null } | null;
   onBounds: (b: BBox, zoom: number) => void;
   onView: (v: { lng: number; lat: number; zoom: number }) => void;
   onDrawn: (g: GeoJSON.GeoJSON) => void;
   onMapReady: (map: MlMap) => void;
   onPick: (lng: number, lat: number) => void;
+  onTerraDrawRef?: (draw: any | null) => void;
 }) {
   const mapRef = useRef<MapRef | null>(null);
   const remRef = useRef<{ src: string; layer: string } | null>(null);
@@ -266,7 +269,7 @@ export function MapView({
     map.addLayer({
       id: "river-overlay", type: "line", source: "river-overlay-src",
       layout: { "line-join": "round", "line-cap": "round", visibility: showRiver ? "visible" : "none" },
-      paint: { "line-color": "#ffffff", "line-width": 2, "line-dasharray": [3, 2], "line-opacity": 0.75 },
+      paint: { "line-color": "#ffffff", "line-width": 2, "line-dasharray": [4, 4], "line-opacity": 0.75 },
     } as any, remLayerId ?? undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [riverGeojson, showRiver, ready]);
@@ -304,7 +307,14 @@ export function MapView({
       if (map.getSource(CONTOUR_SRC)) map.removeSource(CONTOUR_SRC);
     };
 
-    if (!showContours) { removeContours(); return; }
+    // Build the source/layers whenever an actual REM/DEM layer would render — NOT
+    // gated on showContours (a dedicated effect toggles visibility). This keeps the
+    // source alive across on/off toggles, fixing the "won't re-enable" + detach churn.
+    // hasRun also prevents stale raw-DEM contours on reload when no run is selected.
+    const hasRun = engine === "client"
+      ? (isDemMode || (!!riverPoints && riverPoints.length > 0))
+      : !!cogUrl;
+    if (!hasRun) { removeContours(); return; }
 
     // Always rebuild when isDemMode changes (different thresholds = different tile URL).
     removeContours();
@@ -317,33 +327,41 @@ export function MapView({
       const contourUrl = useRemTiles ? "rem://tiles/{z}/{x}/{y}" : MAPTERHORN_DEM;
       if (useRemTiles) ensureRemFetchPatch();
       // Recreate DemSource when the tile URL changes (e.g. switching REM ↔ DEM mode or engine).
-      if (!demSourceRef.current || (demSourceRef.current as any).__url !== contourUrl) {
+      const srcKey = `${contourUrl}@${clientMaxZoom}`;
+      if (!demSourceRef.current || (demSourceRef.current as any).__key !== srcKey) {
         demSourceRef.current = new mlcontour.DemSource({
           url: contourUrl,
           encoding: "terrarium",
-          maxzoom: 13,
+          maxzoom: clientMaxZoom, // cap at probed Mapterhorn depth (no over-zoom 404s)
           worker: !useRemTiles, // rem:// only resolves in main thread via patched fetch
+          // worker:false path returns its CACHED MVT buffer directly; maplibre transfers
+          // (detaches) it, so a cache hit on re-request throws DataCloneError. Disabling
+          // the cache forces a fresh buffer per request. The worker path clones, so it's fine.
+          cacheSize: useRemTiles ? 0 : 100,
         });
-        (demSourceRef.current as any).__url = contourUrl;
+        (demSourceRef.current as any).__key = srcKey;
       }
       const demSource = demSourceRef.current;
       // setupMaplibre needs the maplibregl namespace (has addProtocol), NOT the Map instance.
       demSource.setupMaplibre(maplibregl);
       const thresholds = isDemMode
-        ? { 9: [10, 50], 11: [10, 50], 13: [10, 50] }
+        ? { 9: [5, 25], 11: [5, 25], 13: [5, 25] }
         : { 11: [1, 5], 12: [1, 5], 13: [1, 5] };
       const tilesUrl = demSource.contourProtocolUrl({ thresholds });
+      // Initial visibility from showContours; the dedicated visibility effect keeps
+      // it in sync afterwards WITHOUT tearing the source down (avoids detach churn).
+      const vis = showContours ? "visible" : "none";
       map.addSource(CONTOUR_SRC, { type: "vector", tiles: [tilesUrl], maxzoom: 15 });
       map.addLayer({
         id: LAYER_MINOR, type: "line", source: CONTOUR_SRC, "source-layer": "contours",
         filter: ["==", ["get", "level"], 0],
-        layout: { visibility: "visible" },
+        layout: { visibility: vis },
         paint: { "line-color": "rgba(255,255,255,0.3)", "line-width": 0.7 },
       } as any);
       map.addLayer({
         id: LAYER_MAJOR, type: "line", source: CONTOUR_SRC, "source-layer": "contours",
         filter: ["==", ["get", "level"], 1],
-        layout: { visibility: "visible" },
+        layout: { visibility: vis },
         paint: { "line-color": "rgba(255,255,255,0.7)", "line-width": 1.2 },
       } as any);
       map.addLayer({
@@ -352,10 +370,10 @@ export function MapView({
         layout: {
           "symbol-placement": "line",
           "text-field": ["concat", ["to-string", ["get", "ele"]], "m"],
-          "text-size": 10,
+          "text-size": 12,
           "text-font": ["Noto Sans Regular"],
           "text-keep-upright": true,
-          visibility: "visible",
+          visibility: showContours && showContourLabels ? "visible" : "none",
         },
         paint: {
           "text-color": "rgba(255,255,255,0.9)",
@@ -369,7 +387,29 @@ export function MapView({
     } catch (e) {
       console.warn("[contours] setup failed:", e);
     }
-  }, [showContours, isDemMode, engine, remToken, ready]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemMode, engine, remToken, ready, riverPoints, cogUrl, clientMaxZoom]);
+
+  // Cap the Mapterhorn hillshade/relief source at the probed deepest zoom so it
+  // overzooms (reuses parent tiles) instead of requesting 404s above coverage.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    setRemMaxZoom(clientMaxZoom); // cap buildREMTile's Mapterhorn fetches (no 404s past coverage)
+    if (!map || !ready) return;
+    const s: any = map.getSource("mapterhorn-dem");
+    if (s && s.maxzoom !== clientMaxZoom) { s.maxzoom = clientMaxZoom; map.triggerRepaint(); }
+  }, [clientMaxZoom, ready]);
+
+  // Contour visibility toggle — no source teardown, so it always re-enables.
+  // Labels have their own chip, gated additionally on showContourLabels.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready) return;
+    for (const id of ["contours-minor", "contours-major"])
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showContours ? "visible" : "none");
+    if (map.getLayer("contours-label"))
+      map.setLayoutProperty("contours-label", "visibility", showContours && showContourLabels ? "visible" : "none");
+  }, [showContours, showContourLabels, ready]);
 
   // Samples layer (elevation points used for IDW — client mode only).
   useEffect(() => {
@@ -487,10 +527,14 @@ export function MapView({
     return () => { map.off("click", handler); map.getCanvas().style.cursor = ""; };
   }, [pickMode, ready, onPick]);
 
-  // Hand-drawing with terra-draw (LineString). Defensive across versions.
+  // Hand-drawing with terra-draw (LineString). Exposes instance via onTerraDrawRef
+  // so App.tsx can call draw.addFeatures() for imported GeoJSON files.
   useEffect(() => {
     const map = mapRef.current?.getMap();
-    if (!map || !ready || opts.mode !== "geojson") return;
+    if (!map || !ready || opts.mode !== "geojson") {
+      onTerraDrawRef?.(null);
+      return;
+    }
     let draw: any, cancelled = false;
     (async () => {
       try {
@@ -501,10 +545,20 @@ export function MapView({
         if (cancelled) return;
         draw.start();
         draw.setMode("linestring");
-        draw.on("finish", () => onDrawn({ type: "FeatureCollection", features: draw.getSnapshot() } as GeoJSON.GeoJSON));
+        draw.on("finish", () => {
+          const snap = draw.getSnapshot() as GeoJSON.Feature[];
+          console.log("[terra-draw] finish — features:", snap.length, snap.map((f: GeoJSON.Feature) => f.geometry?.type));
+          onDrawn({ type: "FeatureCollection", features: snap } as GeoJSON.GeoJSON);
+        });
+        onTerraDrawRef?.(draw);
       } catch (e) { console.warn("terra-draw unavailable:", e); }
     })();
-    return () => { cancelled = true; try { draw?.stop?.(); } catch { /* noop */ } };
+    return () => {
+      cancelled = true;
+      onTerraDrawRef?.(null);
+      try { draw?.stop?.(); } catch { /* noop */ }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.mode, ready, onDrawn]);
 
   return (
@@ -526,6 +580,16 @@ export function MapView({
       style={{ position: "absolute", inset: 0 }}
     >
       <NavigationControl position="top-right" />
+      {pick && (
+        <Popup longitude={pick.lng} latitude={pick.lat} closeButton={false} closeOnClick={false}
+          anchor="bottom" offset={12} className="rem-pick-popup">
+          <div className="font-mono text-[11px] leading-tight">
+            <div>REM&nbsp;{pick.rem ?? "–"} m</div>
+            <div>DEM&nbsp;{pick.dem ?? "–"} m</div>
+            <div>{pick.lat.toFixed(5)}, {pick.lng.toFixed(5)}</div>
+          </div>
+        </Popup>
+      )}
     </Map>
   );
 }

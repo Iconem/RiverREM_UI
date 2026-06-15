@@ -25,8 +25,9 @@ type Opts = {
   base: "dark" | "light" | "satellite" | "hillshade" | "none";
   ramp: (typeof RAMP_NAMES)[number];
   reverse: boolean; transparent: "none" | "white" | "black"; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; sliderLo: number | null; sliderHi: number | null; osm: string;
-  qleverMode: "longest" | "all";
+  qleverMode: "longest" | "all" | "waterways";
   showContours: boolean;
+  showContourLabels: boolean;
   showRiver: boolean;
   showSamples: boolean;
   showViewport: boolean;
@@ -137,7 +138,7 @@ export function SidePanel(p: {
       ui.theme === "light" ? "supports-[backdrop-filter]:bg-background/95" : "supports-[backdrop-filter]:bg-background/85"
     }`;
 
-  const allFolded = ui.foldCl && ui.foldComp && ui.foldRamp && ui.foldExport && ui.foldUtil && ui.foldRuns;
+  const allFolded = ui.foldCl && ui.foldComp && ui.foldRamp && ui.foldLayers && ui.foldExport && ui.foldUtil && ui.foldRuns;
 
   if (ui.collapsed) {
     return (
@@ -152,16 +153,16 @@ export function SidePanel(p: {
 
   return (
     <Card className={`${cardBase} panel-scroll flex max-h-[calc(100vh-2rem)] flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0`}>
-      {/* Header */}
-      <div className="flex items-start justify-between">
+      {/* Header — clicking title or whitespace collapses the sidebar */}
+      <div className="flex cursor-pointer items-start justify-between" onClick={() => setUi({ collapsed: true })}>
         <div>
           <div className="font-sans text-base font-semibold tracking-tight">River REM</div>
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">River Relative Elevation Model</div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
           {/* Expand/collapse all sections */}
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
-            setUi({ foldCl: !allFolded, foldComp: !allFolded, foldRamp: !allFolded, foldExport: !allFolded, foldUtil: !allFolded, foldRuns: !allFolded });
+            setUi({ foldCl: !allFolded, foldComp: !allFolded, foldRamp: !allFolded, foldLayers: !allFolded, foldExport: !allFolded, foldUtil: !allFolded, foldRuns: !allFolded });
           }}
             title={allFolded ? "Expand all sections" : "Collapse all sections"}
             aria-label={allFolded ? "expand all sections" : "collapse all sections"}>
@@ -237,18 +238,19 @@ export function SidePanel(p: {
                 <div className="flex items-center justify-between gap-2">
                   <Label>River mode</Label>
                   <div className="w-44">
-                    <Select value={opts.qleverMode} onValueChange={(v) => setOpts({ qleverMode: v as "longest" | "all" })}>
+                    <Select value={opts.qleverMode} onValueChange={(v) => setOpts({ qleverMode: v as "longest" | "all" | "waterways" })}>
                       <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="longest">Longest named river</SelectItem>
-                        <SelectItem value="all">All rivers in view</SelectItem>
+                        <SelectItem value="all">All named rivers</SelectItem>
+                        <SelectItem value="waterways">All waterways (incl. unnamed)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
               )}
               <Button variant="outline" size="sm" className="w-full" onClick={p.onPreview} disabled={busy}>
-                {opts.qleverMode === "all" && opts.osm.includes("qlever") ? "Preview all rivers" : "Preview longest river"}
+                {opts.osm.includes("qlever") && opts.qleverMode === "all" ? "Preview named rivers" : opts.osm.includes("qlever") && opts.qleverMode === "waterways" ? "Preview all waterways" : "Preview longest river"}
               </Button>
             </>
           )}
@@ -320,7 +322,7 @@ export function SidePanel(p: {
             </p>
           ) : (
             <div className="space-y-1">
-              <Label>DEM COG URL (optional)</Label>
+              <Label>Custom DEM COG (optional)</Label>
               <Input className="text-xs" value={p.demCogUrl} onChange={(e) => p.setDemCogUrl(e.target.value)} placeholder="https://…/dem.tif — overrides Mapterhorn" />
             </div>
           )}
@@ -334,19 +336,6 @@ export function SidePanel(p: {
             <p className="font-mono text-[10px] leading-relaxed text-amber-500/90">{p.resNote}</p>
           )}
 
-          {result && p.hasDem && (
-            <div className="space-y-1">
-              <Label>Layer (click to flip)</Label>
-              <div className="flex h-10 overflow-hidden rounded-md border border-border text-sm font-medium">
-                {(["rem", "dem"] as const).map((l) => (
-                  <button key={l} onClick={flipLayer}
-                    className={`flex-1 transition-colors ${p.layer === l ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}>
-                    {l.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </>)}
       </div>
 
@@ -381,13 +370,6 @@ export function SidePanel(p: {
               )}
             </div>
           )}
-          <div className="space-y-2">
-            <Label>Custom DEM COG</Label>
-            <div className="flex gap-2">
-              <Input placeholder="https://…/dem.tif" value={cogUrl} onChange={(e) => setCogUrl(e.target.value)} />
-              <Button variant="outline" size="sm" onClick={() => cogUrl && p.onLoadCog(cogUrl)} disabled={busy}>Load</Button>
-            </div>
-          </div>
         </>)}
       </div>
 
@@ -398,7 +380,7 @@ export function SidePanel(p: {
         {/* Title bar: clicking label, chevron, or whitespace toggles fold; action buttons stop propagation */}
         <div className="flex cursor-pointer items-center justify-between gap-1" onClick={() => setUi({ foldRamp: !ui.foldRamp })}>
           <Label className="cursor-pointer">Symbology</Label>
-          <div className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
             {result && p.onFitBounds && (
               <button onClick={p.onFitBounds}
                 title="Zoom to run extent" aria-label="zoom to run extent"
@@ -420,7 +402,7 @@ export function SidePanel(p: {
                 className={`shrink-0 transition-colors ${
                   p.syncFlash ? "text-green-500" : p.serverSynced ? "text-muted-foreground/40" : "text-amber-500"
                 }`}>
-                <RefreshCw className={`h-3.5 w-3.5 ${!p.serverSynced && !p.syncFlash ? "animate-spin" : ""}`} />
+                <RefreshCw className="h-3.5 w-3.5" />
               </button>
             )}
             <button onClick={() => setUi({ foldRamp: !ui.foldRamp })}>
@@ -431,13 +413,16 @@ export function SidePanel(p: {
 
         {!ui.foldRamp && (<>
           {result && (
-            <div className="flex h-8 overflow-hidden rounded-md border border-border text-xs font-medium">
-              {(["rem", "dem"] as const).map((l) => (
-                <button key={l} onClick={flipLayer}
-                  className={`flex-1 transition-colors ${p.layer === l ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}>
-                  {l.toUpperCase()}
-                </button>
-              ))}
+            <div className="space-y-1">
+              <Label>Layer (click to flip)</Label>
+              <div className="flex h-8 overflow-hidden rounded-md border border-border text-xs font-medium">
+                {(["rem", "dem"] as const).map((l) => (
+                  <button key={l} onClick={flipLayer}
+                    className={`flex-1 transition-colors ${p.layer === l ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"}`}>
+                    {l.toUpperCase()}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           <div className="space-y-2">
@@ -519,9 +504,15 @@ export function SidePanel(p: {
               <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
             </div>
           </div>
+        </>)}
+      </div>
 
-          <Separator />
-          <Label>Layers style</Label>
+      <Separator />
+
+      {/* Layers (foldable) — basemap, relief overlay, visibility chips */}
+      <div className="space-y-3">
+        <FoldHeader label="Layers" folded={ui.foldLayers} onClick={() => setUi({ foldLayers: !ui.foldLayers })} />
+        {!ui.foldLayers && (<>
           <div className="flex items-center justify-between">
             <Label>Basemap</Label>
             <div className="w-44">
@@ -550,11 +541,12 @@ export function SidePanel(p: {
 
           {/* Layer visibility chips */}
           <div className="space-y-1.5">
-            <Label>Layers</Label>
+            <Label>Visibility</Label>
             <div className="flex flex-wrap gap-1.5">
-              {/* REM Contours — requires a computed REM layer */}
+              {/* Contours chip — label changes with active layer */}
               {([
-                { key: "showContours", label: "REM Contours", color: "#94a3b8", needsResult: true },
+                { key: "showContours", label: isDem ? "DEM Contours" : "REM Contours", color: "#94a3b8", needsResult: true },
+                { key: "showContourLabels", label: "Contour Labels", color: "#cbd5e1", needsResult: true },
               ] as { key: keyof Opts & string; label: string; color: string; needsResult: boolean }[]).map(({ key, label, color, needsResult }) => {
                 const on = opts[key] as boolean;
                 const disabled = needsResult && !result;
@@ -566,11 +558,11 @@ export function SidePanel(p: {
                   </button>
                 );
               })}
-              {/* REM Output — requires a computed REM layer */}
+              {/* REM/DEM Output chip */}
               <button disabled={!result} onClick={result ? p.onToggleLayer : undefined}
                 className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${!result ? "cursor-not-allowed border-border text-muted-foreground opacity-30" : p.remVisible ? "border-transparent bg-foreground/10 text-foreground" : "border-border text-muted-foreground opacity-50"}`}>
                 <span className="h-2 w-2 rounded-full" style={{ background: result && p.remVisible ? "#60a5fa" : "#666" }} />
-                REM Output
+                {isDem ? "DEM Output" : "REM Output"}
               </button>
               {/* River — always enabled when centerline exists; River Samples needs result + client */}
               {([
@@ -597,7 +589,7 @@ export function SidePanel(p: {
                   }}
                     className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${on ? "border-transparent bg-foreground/10 text-foreground" : "border-border text-muted-foreground opacity-50"}`}>
                     <span className="h-2 w-2 rounded-full" style={{ background: on ? "#d97706" : "#666" }} />
-                    Hillshade Overlay
+                    Hillshade
                   </button>
                 );
               })()}
