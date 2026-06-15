@@ -1,10 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Map, { Source, Layer, type MapRef, NavigationControl } from "react-map-gl/maplibre";
+import Map, { type MapRef, NavigationControl } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
+import mlcontour from "maplibre-contour";
 import type { StyleSpecification, Map as MlMap } from "maplibre-gl";
 import { cogProtocol, setColorFunction } from "@geomatico/maplibre-cog-protocol";
 import { colorReliefExpr } from "@/lib/colormap";
-import { ensureRemProtocol, setRemParams, type RiverPoint } from "@/lib/remClient";
+import { ensureRemProtocol, setRemParams, buildREMTile, type RiverPoint } from "@/lib/remClient";
+
+// Patch window.fetch so maplibre-contour (worker:false) can resolve rem:// tile URLs.
+// addProtocol registrations are MapLibre-internal and invisible to external fetch().
+let _remFetchPatched = false;
+function ensureRemFetchPatch() {
+  if (_remFetchPatched) return;
+  _remFetchPatched = true;
+  const orig = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+    if (url.startsWith("rem://tiles/")) {
+      const [z, x, y] = url.replace("rem://tiles/", "").split("/").map(Number);
+      const buf = await buildREMTile(z, x, y);
+      return new Response(buf, { status: 200, headers: { "Content-Type": "image/png" } });
+    }
+    return orig(input, init);
+  };
+}
 import type { BBox } from "@/lib/api";
 
 // Register the geomatico COG protocol once. For the `cog://…#dem` path we register a
@@ -89,6 +108,7 @@ type Opts = { ramp: string; min: number; max: number; mode: string; base: string
 export function MapView({
   initialView, opts, cogUrl, cogBounds, fitSignal, theme, preview, remVisible, pickMode,
   engine, riverPoints, idwPower, clientMaxZoom, remToken,
+  riverGeojson, showContours, isDemMode, showRiver, showSamples, showViewport,
   onBounds, onView, onDrawn, onMapReady, onPick,
 }: {
   initialView: { lng: number; lat: number; zoom: number };
@@ -98,6 +118,12 @@ export function MapView({
   fitSignal: number;
   theme: "dark" | "light";
   preview: GeoJSON.GeoJSON | null;
+  riverGeojson: GeoJSON.GeoJSON | null;
+  showContours: boolean;
+  isDemMode: boolean;
+  showRiver: boolean;
+  showSamples: boolean;
+  showViewport?: boolean;
   engine: "server" | "client";
   riverPoints: RiverPoint[] | null;
   idwPower: number;
@@ -140,18 +166,28 @@ export function MapView({
     const layer = `rem-layer-${key}`;
 
     if (engine === "client") {
-      // Pure-JS engine: build the REM live per tile from sampled river points.
-      if (!riverPoints || riverPoints.length === 0) return;
-      ensureRemProtocol();
-      setRemParams(riverPoints, idwPower);
-      map.addSource(src, {
-        type: "raster-dem",
-        tiles: ["rem://tiles/{z}/{x}/{y}"],
-        tileSize: 256,
-        encoding: "terrarium",
-        bounds: cogBounds ?? undefined,
-        maxzoom: clientMaxZoom,
-      } as any);
+      if (isDemMode) {
+        // Client DEM mode: show raw Mapterhorn elevation via a dedicated source.
+        map.addSource(src, {
+          type: "raster-dem",
+          tiles: [MAPTERHORN_DEM],
+          tileSize: 256,
+          encoding: "terrarium",
+        } as any);
+      } else {
+        // Pure-JS REM engine: build the REM live per tile from sampled river points.
+        if (!riverPoints || riverPoints.length === 0) return;
+        ensureRemProtocol();
+        setRemParams(riverPoints, idwPower);
+        map.addSource(src, {
+          type: "raster-dem",
+          tiles: ["rem://tiles/{z}/{x}/{y}"],
+          tileSize: 256,
+          encoding: "terrarium",
+          bounds: cogBounds ?? undefined,
+          maxzoom: clientMaxZoom,
+        } as any);
+      }
     } else {
       if (!cogUrl) return;
       const url = `cog://${cogUrl}#dem`;
@@ -174,8 +210,14 @@ export function MapView({
       paint: { "color-relief-color": colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse, opts.transparent) as any, "color-relief-opacity": 0.95 },
     } as any);
     remRef.current = { src, layer };
+    // Bring overlay layers above the freshly added REM tint (river stays below REM intentionally)
+    if (map.getLayer("contours-minor")) map.moveLayer("contours-minor");
+    if (map.getLayer("contours-major")) map.moveLayer("contours-major");
+    if (map.getLayer("contours-label")) map.moveLayer("contours-label");
+    if (map.getLayer("hillshade-overlay")) map.moveLayer("hillshade-overlay");
+    if (map.getLayer("preview-line")) map.moveLayer("preview-line");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, cogUrl, remToken, clientMaxZoom, ready]);
+  }, [engine, cogUrl, remToken, clientMaxZoom, isDemMode, ready]);
 
   // Fit the camera to the COG only on an explicit signal (run load / compute
   // complete) — never on a plain REM/DEM layer toggle, which also changes cogUrl.
@@ -206,8 +248,166 @@ export function MapView({
     map.setPaintProperty(id, "hillshade-exaggeration", 0.5);
     map.setLayoutProperty(id, "visibility", "visible");
     map.moveLayer(id); // keep it topmost, above the freshly (re)added color-relief
+    // Keep preview above hillshade; river stays below REM intentionally
+    if (map.getLayer("preview-line")) map.moveLayer("preview-line");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.hillshade, ready, cogUrl, remToken, engine]);
+
+  // River overlay (dashed white, below REM layer). Rebuilds on geojson or visibility change.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready) return;
+    if (map.getLayer("river-overlay")) map.removeLayer("river-overlay");
+    if (map.getSource("river-overlay-src")) map.removeSource("river-overlay-src");
+    if (!riverGeojson) return;
+    map.addSource("river-overlay-src", { type: "geojson", data: riverGeojson });
+    // Insert below the REM layer so it's visible through the semi-transparent REM.
+    const remLayerId = remRef.current?.layer;
+    map.addLayer({
+      id: "river-overlay", type: "line", source: "river-overlay-src",
+      layout: { "line-join": "round", "line-cap": "round", visibility: showRiver ? "visible" : "none" },
+      paint: { "line-color": "#ffffff", "line-width": 2, "line-dasharray": [3, 2], "line-opacity": 0.75 },
+    } as any, remLayerId ?? undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [riverGeojson, showRiver, ready]);
+
+  // Preview (dashed drawn centerline).
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready) return;
+    if (map.getLayer("preview-line")) map.removeLayer("preview-line");
+    if (map.getSource("preview")) map.removeSource("preview");
+    if (!preview) return;
+    map.addSource("preview", { type: "geojson", data: preview });
+    map.addLayer({
+      id: "preview-line", type: "line", source: "preview",
+      paint: { "line-color": "#ffffff", "line-width": 2, "line-dasharray": [2, 1] },
+    } as any);
+  }, [preview, ready]);
+
+  // Contours overlay via maplibre-contour (vector tiles from Mapterhorn DEM, 1m spacing).
+  // DemSource is created once per map instance and torn down on unmount.
+  const demSourceRef = useRef<any>(null);
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready) return;
+
+    const CONTOUR_SRC = "contour-dem-src";
+    const LAYER_MINOR = "contours-minor";
+    const LAYER_MAJOR = "contours-major";
+    const LAYER_LABEL = "contours-label";
+
+    const removeContours = () => {
+      if (map.getLayer(LAYER_LABEL)) map.removeLayer(LAYER_LABEL);
+      if (map.getLayer(LAYER_MINOR)) map.removeLayer(LAYER_MINOR);
+      if (map.getLayer(LAYER_MAJOR)) map.removeLayer(LAYER_MAJOR);
+      if (map.getSource(CONTOUR_SRC)) map.removeSource(CONTOUR_SRC);
+    };
+
+    if (!showContours) { removeContours(); return; }
+
+    // Always rebuild when isDemMode changes (different thresholds = different tile URL).
+    removeContours();
+
+    try {
+      // Client non-DEM mode: use the live REM tiles (rem://). We patch window.fetch
+      // so maplibre-contour (worker:false) can resolve the custom scheme in the main thread.
+      // All other modes: use Mapterhorn absolute-elevation tiles (web worker is fine there).
+      const useRemTiles = engine === "client" && !isDemMode;
+      const contourUrl = useRemTiles ? "rem://tiles/{z}/{x}/{y}" : MAPTERHORN_DEM;
+      if (useRemTiles) ensureRemFetchPatch();
+      // Recreate DemSource when the tile URL changes (e.g. switching REM ↔ DEM mode or engine).
+      if (!demSourceRef.current || (demSourceRef.current as any).__url !== contourUrl) {
+        demSourceRef.current = new mlcontour.DemSource({
+          url: contourUrl,
+          encoding: "terrarium",
+          maxzoom: 13,
+          worker: !useRemTiles, // rem:// only resolves in main thread via patched fetch
+        });
+        (demSourceRef.current as any).__url = contourUrl;
+      }
+      const demSource = demSourceRef.current;
+      // setupMaplibre needs the maplibregl namespace (has addProtocol), NOT the Map instance.
+      demSource.setupMaplibre(maplibregl);
+      const thresholds = isDemMode
+        ? { 9: [10, 50], 11: [10, 50], 13: [10, 50] }
+        : { 11: [1, 5], 12: [1, 5], 13: [1, 5] };
+      const tilesUrl = demSource.contourProtocolUrl({ thresholds });
+      map.addSource(CONTOUR_SRC, { type: "vector", tiles: [tilesUrl], maxzoom: 15 });
+      map.addLayer({
+        id: LAYER_MINOR, type: "line", source: CONTOUR_SRC, "source-layer": "contours",
+        filter: ["==", ["get", "level"], 0],
+        layout: { visibility: "visible" },
+        paint: { "line-color": "rgba(255,255,255,0.3)", "line-width": 0.7 },
+      } as any);
+      map.addLayer({
+        id: LAYER_MAJOR, type: "line", source: CONTOUR_SRC, "source-layer": "contours",
+        filter: ["==", ["get", "level"], 1],
+        layout: { visibility: "visible" },
+        paint: { "line-color": "rgba(255,255,255,0.7)", "line-width": 1.2 },
+      } as any);
+      map.addLayer({
+        id: LAYER_LABEL, type: "symbol", source: CONTOUR_SRC, "source-layer": "contours",
+        filter: ["==", ["get", "level"], 1],
+        layout: {
+          "symbol-placement": "line",
+          "text-field": ["concat", ["to-string", ["get", "ele"]], "m"],
+          "text-size": 10,
+          "text-font": ["Noto Sans Regular"],
+          "text-keep-upright": true,
+          visibility: "visible",
+        },
+        paint: {
+          "text-color": "rgba(255,255,255,0.9)",
+          "text-halo-color": "rgba(0,0,0,0.6)",
+          "text-halo-width": 1.5,
+        },
+      } as any);
+      // Bring contours above REM layer (REM may have been added before this effect).
+      if (map.getLayer("hillshade-overlay")) map.moveLayer("hillshade-overlay");
+      if (map.getLayer("preview-line")) map.moveLayer("preview-line");
+    } catch (e) {
+      console.warn("[contours] setup failed:", e);
+    }
+  }, [showContours, isDemMode, engine, remToken, ready]);
+
+  // Samples layer (elevation points used for IDW — client mode only).
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready) return;
+    if (map.getLayer("samples-layer")) map.removeLayer("samples-layer");
+    if (map.getSource("samples-src")) map.removeSource("samples-src");
+    if (!riverPoints || riverPoints.length === 0 || !showSamples) return;
+    // Convert EPSG:3857 (mx, my) → WGS84 (lng, lat) for GeoJSON.
+    const mxToLng = (mx: number) => (mx / 20037508.342) * 180;
+    const myToLat = (my: number) => {
+      const lat = (180 / Math.PI) * (2 * Math.atan(Math.exp((my / 20037508.342) * Math.PI)) - Math.PI / 2);
+      return lat;
+    };
+    const geojson: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: riverPoints.map((p) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [mxToLng(p.mx), myToLat(p.my)] },
+        properties: { elev: Math.round(p.elev * 10) / 10 },
+      })),
+    };
+    map.addSource("samples-src", { type: "geojson", data: geojson });
+    map.addLayer({
+      id: "samples-layer", type: "circle", source: "samples-src",
+      paint: {
+        "circle-radius": 3, "circle-color": "#fbbf24",
+        "circle-stroke-color": "#09090b", "circle-stroke-width": 1, "circle-opacity": 0.9,
+      },
+    } as any);
+  }, [riverPoints, showSamples, ready]);
+
+  // Samples visibility toggle without full rebuild.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready || !map.getLayer("samples-layer")) return;
+    map.setLayoutProperty("samples-layer", "visibility", showSamples ? "visible" : "none");
+  }, [showSamples, ready]);
 
   // Live recolour — just update the paint expression (GPU, instant).
   useEffect(() => {
@@ -257,6 +457,24 @@ export function MapView({
     map.resize();          // re-cover tiles + resize the backing store at the new ratio
     map.triggerRepaint();
   }, [opts.oversample, ready]);
+
+  // Viewport bounds rectangle — shows the compute bbox when the chip is on.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready) return;
+    if (map.getLayer("viewport-line")) map.removeLayer("viewport-line");
+    if (map.getLayer("viewport-fill")) map.removeLayer("viewport-fill");
+    if (map.getSource("viewport-src")) map.removeSource("viewport-src");
+    if (!showViewport || !cogBounds) return;
+    const [w, s, e, n] = cogBounds;
+    const poly: GeoJSON.Feature = {
+      type: "Feature", properties: {},
+      geometry: { type: "Polygon", coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] },
+    };
+    map.addSource("viewport-src", { type: "geojson", data: poly });
+    map.addLayer({ id: "viewport-fill", type: "fill", source: "viewport-src", paint: { "fill-color": "#a78bfa", "fill-opacity": 0.08 } } as any);
+    map.addLayer({ id: "viewport-line", type: "line", source: "viewport-src", paint: { "line-color": "#a78bfa", "line-width": 1.5, "line-dasharray": [4, 3] } } as any);
+  }, [showViewport, cogBounds, ready]);
 
   // Pick mode: click to sample REM/DEM elevation; cursor feedback.
   useEffect(() => {
@@ -308,11 +526,6 @@ export function MapView({
       style={{ position: "absolute", inset: 0 }}
     >
       <NavigationControl position="top-right" />
-      {preview && (
-        <Source id="preview" type="geojson" data={preview}>
-          <Layer id="preview-line" type="line" paint={{ "line-color": "#ffffff", "line-width": 2, "line-dasharray": [2, 1] }} />
-        </Source>
-      )}
     </Map>
   );
 }

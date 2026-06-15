@@ -39,7 +39,7 @@ export function useRemOptions() {
     ramp: parseAsStringEnum([...RAMP_NAMES]).withDefault("mako_r"),
     reverse: parseAsBoolean.withDefault(false),
     transparent: parseAsStringEnum(["none", "white", "black"]).withDefault("none"), // make the white/black end see-through
-    min: parseAsFloat.withDefault(0),
+    min: parseAsFloat.withDefault(-1),
     max: parseAsFloat.withDefault(10),
     log: parseAsBoolean.withDefault(true),
     res: parseAsInteger.withDefault(1), // 1 | 2 | 4 resolution multiplier
@@ -49,6 +49,11 @@ export function useRemOptions() {
     sliderLo: parseAsFloat, // optional custom slider lower bound (null = auto)
     sliderHi: parseAsFloat, // optional custom slider upper bound (null = auto)
     osm: parseAsString.withDefault("https://qlever.dev/api/osm-planet"),
+    qleverMode: parseAsStringEnum(["longest", "all"]).withDefault("longest"),
+    showContours: parseAsBoolean.withDefault(false),
+    showRiver: parseAsBoolean.withDefault(true),
+    showSamples: parseAsBoolean.withDefault(false),
+    showViewport: parseAsBoolean.withDefault(false),
   });
 }
 
@@ -70,8 +75,11 @@ export function useUiState() {
     foldRamp: parseAsBoolean.withDefault(false),
     foldUtil: parseAsBoolean.withDefault(true), // utilities (basemap/inspect/load) folded
     collapsed: parseAsBoolean.withDefault(false), // whole panel collapsed
-    runsView: parseAsStringEnum(["list", "gallery"]).withDefault("list"),
+    runsView: parseAsStringEnum(["list", "gallery"]).withDefault("gallery"),
     runsSource: parseAsStringEnum(["device", "server"]).withDefault("device"),
     theme: parseAsStringEnum(["dark", "light"]).withDefault("dark"),
+    foldComp: parseAsBoolean.withDefault(false),   // compute section folded
+    foldExport: parseAsBoolean.withDefault(false), // export section folded
+    foldRuns: parseAsBoolean.withDefault(false),   // runs section folded
   });
 }

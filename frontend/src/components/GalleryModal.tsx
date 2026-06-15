@@ -88,7 +88,7 @@ export default function GalleryModal({
   const gridCls = view === "grid" ? "grid grid-cols-2 gap-3 sm:grid-cols-3" : "space-y-1.5";
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-[20] flex items-center justify-center p-4"
       onClick={onClose} role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div className="relative flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl"

@@ -181,12 +181,20 @@
             </div>
           </div>
           <div class="field" style="margin-top:7px">
-            <label>Overpass endpoint</label>
-            <select id="overpass-url">
+            <label>Endpoint</label>
+            <select id="overpass-url" onchange="updateEndpointUI()">
+              <option value="qlever">QLever (fast SPARQL)</option>
               <option value="https://overpass-api.de/api/interpreter">overpass-api.de</option>
               <option value="https://overpass.private.coffee/api/interpreter">private.coffee</option>
               <option value="https://overpass.kumi.systems/api/interpreter">kumi.systems</option>
               <option value="https://maps.mail.ru/osm/tools/overpass/api/interpreter">mail.ru</option>
+            </select>
+          </div>
+          <div class="field" id="qlever-mode-row" style="margin-top:7px">
+            <label>River mode</label>
+            <select id="qlever-mode">
+              <option value="longest">Longest named river</option>
+              <option value="all">All rivers in view</option>
             </select>
           </div>
           <!-- IDW backend toggle -->
@@ -217,6 +225,13 @@
           <div class="range-header">
             <span class="range-title">Color bounds (m)</span>
             <span class="range-vals"><span id="rem-min-lbl">−5</span> → <span id="rem-max-lbl">+10</span></span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+            <input type="number" id="bound-min-num" value="-5" step="0.5" style="width:60px;font-size:11px" title="Min bound"/>
+            <button id="bound-min-pin" title="Pin slider min to this value" style="background:none;border:1px solid var(--border2);border-radius:4px;padding:1px 5px;cursor:pointer;font-size:11px;color:var(--muted-fg)" onclick="pinBound('min')">📌</button>
+            <span style="flex:1"></span>
+            <button id="bound-max-pin" title="Pin slider max to this value" style="background:none;border:1px solid var(--border2);border-radius:4px;padding:1px 5px;cursor:pointer;font-size:11px;color:var(--muted-fg)" onclick="pinBound('max')">📌</button>
+            <input type="number" id="bound-max-num" value="10" step="0.5" style="width:60px;font-size:11px;text-align:right" title="Max bound"/>
           </div>
           <div class="double-slider">
             <div class="slider-track"></div>
@@ -259,6 +274,7 @@
    GLOBALS
 ═══════════════════════════════════════════════════════════════════════════ */
 const MAPTERHORN    = 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp';
+// getOverpassUrl kept as alias for any legacy references
 const getOverpassUrl = () => document.getElementById('overpass-url').value;
 
 let map, riverPoints = []; // riverPoints: [{mx,my,elev}] — pre-projected to EPSG:3857
@@ -366,12 +382,21 @@ async function getElevation(lon,lat,z){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   ENDPOINT UI
+═══════════════════════════════════════════════════════════════════════════ */
+function getOverpassEndpoint(){return document.getElementById('overpass-url').value;}
+function isQleverSelected(){return getOverpassEndpoint()==='qlever';}
+function updateEndpointUI(){
+  document.getElementById('qlever-mode-row').style.display=isQleverSelected()?'':'none';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    OVERPASS + SEGMENT ORDERING
 ═══════════════════════════════════════════════════════════════════════════ */
-async function fetchLongestRiver(bbox){
+async function fetchRiversOverpass(bbox){
   const[s,w,n,e]=bbox;
   const q=`[out:json][timeout:45];(way[waterway=river][name](${s},${w},${n},${e});way[waterway=stream][name](${s},${w},${n},${e}););out geom;`;
-  const resp=await fetch(getOverpassUrl(),{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
+  const resp=await fetch(getOverpassEndpoint(),{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});
   if(!resp.ok)throw new Error(`Overpass HTTP ${resp.status}`);
   const json=await resp.json();
   if(!json.elements?.length)throw new Error('No waterways found in bbox');
@@ -386,10 +411,91 @@ async function fetchLongestRiver(bbox){
       len+=haversine(el.geometry[i-1].lat,el.geometry[i-1].lon,el.geometry[i].lat,el.geometry[i].lon);
     byName[name].totalLen+=len;
   }
-  const sorted=Object.values(byName).sort((a,b)=>b.totalLen-a.totalLen);
+  return Object.values(byName);
+}
+
+function parseWKTFeatures(name,wkt){
+  // strip optional CRS URI prefix e.g. <http://...> LINESTRING(...)
+  const clean=wkt.replace(/^<[^>]*>\s*/,'');
+  const up=clean.toUpperCase();
+  const parsePairs=body=>body.trim().split(',').map(p=>{const[lo,la]=p.trim().split(/\s+/);return{lon:parseFloat(lo),lat:parseFloat(la)};});
+  const segs=[];
+  if(up.startsWith('LINESTRING')){
+    const m=clean.match(/\(([^()]*)\)/);if(m){const s=parsePairs(m[1]);if(s.length>=2)segs.push(s);}
+  }else if(up.startsWith('MULTILINESTRING')){
+    for(const m of clean.matchAll(/\(([^()]*)\)/g)){const s=parsePairs(m[1]);if(s.length>=2)segs.push(s);}
+  }
+  return segs;
+}
+
+async function fetchRiversQlever(bbox){
+  const[s,w,n,e]=bbox;
+  const poly=`POLYGON((${w} ${s},${e} ${s},${e} ${n},${w} ${n},${w} ${s}))`;
+  const sparql=`
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX osmkey: <https://www.openstreetmap.org/wiki/Key:>
+PREFIX spatialSearch: <https://qlever.cs.uni-freiburg.de/spatialSearch/>
+SELECT ?name ?wkt WHERE {
+  BIND("${poly}"^^geo:wktLiteral AS ?area)
+  SERVICE spatialSearch: {
+    _:config spatialSearch:algorithm spatialSearch:libspatialjoin ;
+             spatialSearch:joinType spatialSearch:intersects ;
+             spatialSearch:left ?area ;
+             spatialSearch:right ?wkt ;
+             spatialSearch:payload ?name .
+    {
+      ?osm osmkey:waterway ?ww .
+      ?osm osmkey:name ?name .
+      ?osm geo:hasGeometry/geo:asWKT ?wkt .
+      FILTER(?ww = "river" || ?ww = "stream" || ?ww = "tidal_channel")
+    }
+  }
+} LIMIT 5000`;
+  const resp=await fetch('https://qlever.dev/api/osm-planet',{
+    method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/sparql-results+json'},
+    body:'query='+encodeURIComponent(sparql)
+  });
+  if(!resp.ok)throw new Error(`QLever HTTP ${resp.status}`);
+  const json=await resp.json();
+  const rows=json.results?.bindings||[];
+  if(!rows.length)throw new Error('No waterways found in QLever bbox');
+  const byName={};
+  for(const row of rows){
+    const name=row.name?.value;const wkt=row.wkt?.value;
+    if(!name||!wkt)continue;
+    const segs=parseWKTFeatures(name,wkt);
+    for(const seg of segs){
+      if(!byName[name])byName[name]={name,segments:[],totalLen:0};
+      byName[name].segments.push(seg);
+      let len=0;
+      for(let i=1;i<seg.length;i++)len+=haversine(seg[i-1].lat,seg[i-1].lon,seg[i].lat,seg[i].lon);
+      byName[name].totalLen+=len;
+    }
+  }
+  return Object.values(byName);
+}
+
+async function fetchRiversByMode(bbox){
+  if(isQleverSelected()){
+    try{return await fetchRiversQlever(bbox);}
+    catch(e){console.warn('QLever failed, falling back to Overpass:',e);return await fetchRiversOverpass(bbox);}
+  }
+  return await fetchRiversOverpass(bbox);
+}
+
+async function fetchLongestRiver(bbox){
+  const rivers=await fetchRiversByMode(bbox);
+  const sorted=rivers.sort((a,b)=>b.totalLen-a.totalLen);
   if(!sorted.length)throw new Error('No named waterways resolved');
   const best=sorted[0];
   return{name:best.name,lengthKm:best.totalLen/1000,segments:best.segments,orderedSegments:orderSegments(best.segments)};
+}
+
+async function fetchAllRivers(bbox){
+  const rivers=await fetchRiversByMode(bbox);
+  if(!rivers.length)throw new Error('No named waterways resolved');
+  return rivers.map(r=>({name:r.name,lengthKm:r.totalLen/1000,segments:r.segments,orderedSegments:orderSegments(r.segments)}));
 }
 
 function orderSegments(segs){
@@ -500,6 +606,8 @@ function encodeTerrarium(elev){
 ═══════════════════════════════════════════════════════════════════════════ */
 let gl=null, glProg=null, glPointTex=null, glFbo=null, glRenderTex=null;
 let glInitialised=false, gpuAvailable=false;
+let glRefMx=0, glRefMy=0; // RTC reference: river centroid in 3857 m (float64)
+let glUniLocs=null;        // cached uniform locations (set once after link)
 
 function initWebGL2(){
   const canvas=new OffscreenCanvas(256,256);
@@ -516,20 +624,22 @@ function initWebGL2(){
     void main(){v_uv=a_pos*.5+.5;gl_Position=vec4(a_pos,0,1);}`;
 
   // Fragment shader: per-pixel IDW in 3857 metres, outputs terrarium RGB
+  // Coordinates are RTC (relative to river centroid) so float32 has full precision.
   const fs=`#version 300 es
     precision highp float;
-    uniform sampler2D u_pts;   // RGBA32F: (mx, my, elev, 0) per sample
-    uniform int       u_n;     // number of sample points
+    uniform sampler2D u_pts;      // RGBA32F: (mx-refMx, my-refMy, elev, 0) per sample
+    uniform int       u_n;        // number of sample points
     uniform float     u_power;
-    uniform float     u_tileX; // tile origin mx (3857)
-    uniform float     u_tileY; // tile origin my (3857)
-    uniform float     u_tileW; // tile width  mx (3857)
-    uniform float     u_tileH; // tile height my (3857)
+    uniform float     u_tileXrel; // tile origin mx − refMx (small value)
+    uniform float     u_tileYrel; // tile origin my − refMy (small value)
+    uniform float     u_tileW;    // tile width  mx (3857, same scale — fine as float32)
+    uniform float     u_tileH;    // tile height my (3857)
     in vec2 v_uv;
     out vec4 outColor;
     void main(){
-      float qmx = u_tileX + v_uv.x * u_tileW;
-      float qmy = u_tileY + (1.0-v_uv.y) * u_tileH; // flip y (tile y grows down)
+      // All coords relative to centroid → no catastrophic cancellation
+      float qmx = u_tileXrel + v_uv.x * u_tileW;
+      float qmy = u_tileYrel + (1.0-v_uv.y) * u_tileH; // flip y (tile y grows down)
       float sumW=0.0, sumWZ=0.0;
       for(int i=0;i<u_n;i++){
         vec4 p = texelFetch(u_pts, ivec2(i,0), 0);
@@ -554,6 +664,15 @@ function initWebGL2(){
   gl.attachShader(glProg,compile(gl.FRAGMENT_SHADER,fs));
   gl.linkProgram(glProg);
   if(!gl.getProgramParameter(glProg,gl.LINK_STATUS))throw new Error('GL link: '+gl.getProgramInfoLog(glProg));
+  glUniLocs={
+    pts:     gl.getUniformLocation(glProg,'u_pts'),
+    n:       gl.getUniformLocation(glProg,'u_n'),
+    power:   gl.getUniformLocation(glProg,'u_power'),
+    tileXrel:gl.getUniformLocation(glProg,'u_tileXrel'),
+    tileYrel:gl.getUniformLocation(glProg,'u_tileYrel'),
+    tileW:   gl.getUniformLocation(glProg,'u_tileW'),
+    tileH:   gl.getUniformLocation(glProg,'u_tileH'),
+  };
 
   // Fullscreen quad
   const buf=gl.createBuffer();
@@ -583,19 +702,30 @@ function initWebGL2(){
 
 function uploadPointsToGPU(pts){
   if(!gl||!glPointTex)return;
-  // pack: x=mx, y=my, z=elev, w=0
+  // Compute river centroid in float64 — this becomes the RTC reference so that
+  // all coords passed to the GPU are small (±tens of km), giving full float32 precision.
+  glRefMx=pts.reduce((s,p)=>s+p.mx,0)/pts.length;
+  glRefMy=pts.reduce((s,p)=>s+p.my,0)/pts.length;
+  // pack relative coords: x=mx−ref, y=my−ref, z=elev, w=0
   const data=new Float32Array(pts.length*4);
-  for(let i=0;i<pts.length;i++){data[i*4]=pts[i].mx;data[i*4+1]=pts[i].my;data[i*4+2]=pts[i].elev;}
+  for(let i=0;i<pts.length;i++){
+    data[i*4]  =pts[i].mx-glRefMx;
+    data[i*4+1]=pts[i].my-glRefMy;
+    data[i*4+2]=pts[i].elev;
+  }
   gl.bindTexture(gl.TEXTURE_2D,glPointTex);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,pts.length,1,0,gl.RGBA,gl.FLOAT,data);
 }
 
 function gpuIdwTile(lonW,latN,lonE,latS,power){
   // Returns Float32Array[256*256] of WSE values (metres)
-  if(!gl||!glProg)return null;
+  if(!gl||!glProg||!glUniLocs)return null;
   const tileX=lonToMx(lonW),tileW=lonToMx(lonE)-tileX;
   const tileYS=latToMy(latS),tileYN=latToMy(latN);
-  const tileH=tileYN-tileYS;// positive, latN>latS in 3857
+  const tileH=tileYN-tileYS; // positive, latN>latS in 3857
+  // Subtract RTC reference in float64 → result is small → stored accurately as float32
+  const tileXrel=tileX-glRefMx;
+  const tileYrel=tileYS-glRefMy;
 
   gl.bindFramebuffer(gl.FRAMEBUFFER,glFbo);
   gl.viewport(0,0,256,256);
@@ -604,13 +734,14 @@ function gpuIdwTile(lonW,latN,lonE,latS,power){
   // Bind point texture to unit 0
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D,glPointTex);
-  gl.uniform1i(gl.getUniformLocation(glProg,'u_pts'),0);
-  gl.uniform1i(gl.getUniformLocation(glProg,'u_n'),riverPoints.length);
-  gl.uniform1f(gl.getUniformLocation(glProg,'u_power'),power);
-  gl.uniform1f(gl.getUniformLocation(glProg,'u_tileX'),tileX);
-  gl.uniform1f(gl.getUniformLocation(glProg,'u_tileY'),tileYS);
-  gl.uniform1f(gl.getUniformLocation(glProg,'u_tileW'),tileW);
-  gl.uniform1f(gl.getUniformLocation(glProg,'u_tileH'),tileH);
+  const u=glUniLocs;
+  gl.uniform1i(u.pts,0);
+  gl.uniform1i(u.n,riverPoints.length);
+  gl.uniform1f(u.power,power);
+  gl.uniform1f(u.tileXrel,tileXrel);
+  gl.uniform1f(u.tileYrel,tileYrel);
+  gl.uniform1f(u.tileW,tileW);
+  gl.uniform1f(u.tileH,tileH);
 
   gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
 
@@ -654,10 +785,11 @@ async function buildREMTile(z,x,y,riverPts,power){
     for(let px=0;px<sz;px++){
       let demElev=0;
       if(demData){
-        const sx=Math.min(511,Math.round(px*512/sz));
-        const sy=Math.min(511,Math.round(py*512/sz));
-        const i4=(sy*512+sx)*4;const{data:d}=demData;
-        demElev=(d[i4]*256+d[i4+1]+d[i4+2]/256)-32768;
+        // 2×2 box-average: cancels WebP lossy quantization noise (±1 byte G = ±1 m speckle)
+        const{data:d}=demData;
+        const terr=(x,y)=>{const i4=(Math.min(511,y)*512+Math.min(511,x))*4;return d[i4]*256+d[i4+1]+d[i4+2]/256-32768;};
+        const x0=px*512/sz|0,y0=py*512/sz|0;
+        demElev=(terr(x0,y0)+terr(x0+1,y0)+terr(x0,y0+1)+terr(x0+1,y0+1))/4;
       }
       let wse;
       if(wseArr){
@@ -772,6 +904,9 @@ function addREMLayersToMap(bbox){
       'color-relief-opacity':parseInt(document.getElementById('rem-opacity').value)/100
     }
   });
+  // Bring overlay layers above the newly-added REM layer
+  if(map.getLayer('river'))map.moveLayer('river');
+  if(map.getLayer('samples'))map.moveLayer('samples');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -822,20 +957,38 @@ document.querySelectorAll('.ltog').forEach(btn=>{
    DOUBLE RANGE SLIDER
 ═══════════════════════════════════════════════════════════════════════════ */
 const sliderMin=document.getElementById('rem-min'),sliderMax=document.getElementById('rem-max'),sliderFill=document.getElementById('slider-fill');
-const SLIDER_LO=-10,SLIDER_RANGE=30;
 function fmtBound(v){return(v>=0?'+':'')+parseFloat(v).toFixed(1);}
+sliderMin.addEventListener('input',()=>{if(parseFloat(sliderMin.value)>=parseFloat(sliderMax.value))sliderMin.value=(parseFloat(sliderMax.value)-.1).toFixed(1);updateSliderUI();});
+sliderMax.addEventListener('input',()=>{if(parseFloat(sliderMax.value)<=parseFloat(sliderMin.value))sliderMax.value=(parseFloat(sliderMin.value)+.1).toFixed(1);updateSliderUI();});
+
+// Sync number inputs → slider range limits + map update
+const boundMinNum=document.getElementById('bound-min-num'),boundMaxNum=document.getElementById('bound-max-num');
+function pinBound(side){
+  if(side==='min'){
+    const v=parseFloat(boundMinNum.value);
+    sliderMin.min=v;sliderMax.min=v;
+    if(parseFloat(sliderMin.value)<v)sliderMin.value=v.toFixed(1);
+  }else{
+    const v=parseFloat(boundMaxNum.value);
+    sliderMin.max=v;sliderMax.max=v;
+    if(parseFloat(sliderMax.value)>v)sliderMax.value=v.toFixed(1);
+  }
+  // Recalculate fill % based on new range
+  updateSliderUI();
+}
+// Keep number inputs in sync when slider moves
 function updateSliderUI(){
   const mn=parseFloat(sliderMin.value),mx=parseFloat(sliderMax.value);
-  sliderFill.style.left=((mn-SLIDER_LO)/SLIDER_RANGE*100)+'%';
-  sliderFill.style.width=Math.max(0,(mx-mn)/SLIDER_RANGE*100)+'%';
+  const lo=parseFloat(sliderMin.min||-10),hi=parseFloat(sliderMax.max||20),range=hi-lo;
+  sliderFill.style.left=((mn-lo)/range*100)+'%';
+  sliderFill.style.width=Math.max(0,(mx-mn)/range*100)+'%';
   document.getElementById('rem-min-lbl').textContent=fmtBound(mn);
   document.getElementById('rem-max-lbl').textContent=fmtBound(mx);
   document.getElementById('leg-min').textContent=fmtBound(mn)+' m';
   document.getElementById('leg-max').textContent=fmtBound(mx)+' m';
+  boundMinNum.value=mn.toFixed(1);boundMaxNum.value=mx.toFixed(1);
   updateLegendBar();applyColorToMap();
 }
-sliderMin.addEventListener('input',()=>{if(parseFloat(sliderMin.value)>=parseFloat(sliderMax.value))sliderMin.value=(parseFloat(sliderMax.value)-.1).toFixed(1);updateSliderUI();});
-sliderMax.addEventListener('input',()=>{if(parseFloat(sliderMax.value)<=parseFloat(sliderMin.value))sliderMax.value=(parseFloat(sliderMin.value)+.1).toFixed(1);updateSliderUI();});
 updateSliderUI();
 
 document.getElementById('rem-opacity').addEventListener('input',function(){
@@ -885,13 +1038,34 @@ document.getElementById('btn-run').addEventListener('click',async()=>{
   const useGpu=document.getElementById('gpu-toggle').checked&&gpuAvailable;
   log(`Backend: ${useGpu?'WebGL2 GPU':'CPU'} · zoom ${demZoom}`,'done');
 
+  const qleverMode=document.getElementById('qlever-mode').value;
+  const fetchAll=isQleverSelected()&&qleverMode==='all';
+
   try{
-    const l1=log('Querying Overpass…');
-    const river=await fetchLongestRiver(bbox);
-    logUpdate(l1,`Found: "${river.name}" (${river.lengthKm.toFixed(1)} km)`,'done');
+    const l1=log(isQleverSelected()?'Querying QLever…':'Querying Overpass…');
+    let river,allSegments,displayName;
+    if(fetchAll){
+      const rivers=await fetchAllRivers(bbox);
+      logUpdate(l1,`Found ${rivers.length} rivers`,'done');
+      allSegments=rivers.flatMap(r=>r.segments);
+      displayName=`${rivers.length} rivers`;
+      // Display all rivers as one MultiLineString
+      if(map.getLayer('river'))map.removeLayer('river');
+      if(map.getSource('river-src'))map.removeSource('river-src');
+      map.addSource('river-src',{type:'geojson',data:{type:'FeatureCollection',features:[{type:'Feature',
+        geometry:{type:'MultiLineString',coordinates:allSegments.map(s=>s.map(p=>[p.lon,p.lat]))},
+        properties:{name:displayName}
+      }]}});
+      map.addLayer({id:'river',type:'line',source:'river-src',
+        paint:{'line-color':'#ffffff','line-width':['interpolate',['linear'],['zoom'],8,1,13,3],'line-opacity':0.7}});
+      river={name:displayName,lengthKm:rivers.reduce((s,r)=>s+r.lengthKm,0),segments:allSegments,orderedSegments:allSegments};
+    }else{
+      river=await fetchLongestRiver(bbox);
+      logUpdate(l1,`Found: "${river.name}" (${river.lengthKm.toFixed(1)} km)`,'done');
+      setRiverSource(river.segments,river.name);
+    }
     document.getElementById('s-name').textContent=river.name;
     document.getElementById('s-len').textContent=river.lengthKm.toFixed(1);
-    setRiverSource(river.segments,river.name);
 
     const l2=log(`Sampling ${nSamples} WSE points…`);
     // Clip river to viewport before sampling — concentrates samples where tiles will be rendered
@@ -931,6 +1105,7 @@ window.addEventListener('load',()=>{
   initGeocoder();
   updateLegendBar();
   updateSliderUI();
+  updateEndpointUI();
 
   // Try to initialise WebGL2 GPU context
   try{

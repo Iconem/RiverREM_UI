@@ -4,8 +4,8 @@ import { MapView } from "@/components/MapView";
 import { SidePanel } from "@/components/SidePanel";
 import { useMapView, useRemOptions, useActiveRem, useUiState } from "@/lib/state";
 import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit, type GalleryItem } from "@/lib/api";
-import { fetchLongestRiver, mergeFeatureCollection } from "@/lib/osm";
-import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, type RiverPoint } from "@/lib/remClient";
+import { fetchLongestRiver, fetchAllRivers, mergeFeatureCollection } from "@/lib/osm";
+import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, sampleAt, type RiverPoint } from "@/lib/remClient";
 import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
 import GalleryModal from "@/components/GalleryModal";
 
@@ -42,6 +42,34 @@ function resolutionNote(res: ComputeResponse, screenZoom: number, reqMult: numbe
   const headroom = Math.max(0, smz - Math.round(screenZoom));
   const maxMult = headroom >= 2 ? 4 : headroom >= 1 ? 2 : 1;
   return `Mapterhorn's deepest zoom here is z${smz}, so ${reqMult}× was capped to ${maxMult}× (fetched z${dz}). Zoom the map out to oversample further.`;
+}
+
+/** Clip a GeoJSON centerline to a bounding box expanded by bufferPct on each side. */
+function cropCenterline(geojson: GeoJSON.GeoJSON | null, bbox: BBox, bufferPct = 0.1): GeoJSON.GeoJSON | null {
+  if (!geojson) return null;
+  const bw = bbox.east - bbox.west, bh = bbox.north - bbox.south;
+  const [w, e, s, n] = [bbox.west - bw * bufferPct, bbox.east + bw * bufferPct, bbox.south - bh * bufferPct, bbox.north + bh * bufferPct];
+  const inBox = (c: number[]) => c[0] >= w && c[0] <= e && c[1] >= s && c[1] <= n;
+  const clipCoords = (coords: number[][]): number[][] => {
+    const out: number[][] = [];
+    for (let i = 0; i < coords.length; i++) {
+      const c = coords[i], prev = coords[i - 1];
+      if (inBox(c)) { if (i > 0 && !inBox(prev)) out.push(prev); out.push(c); }
+      else if (i > 0 && inBox(prev)) out.push(c);
+    }
+    return out;
+  };
+  const clipGeom = (g: any): any => {
+    if (g?.type === "LineString") { const c = clipCoords(g.coordinates); return c.length >= 2 ? { ...g, coordinates: c } : null; }
+    if (g?.type === "MultiLineString") { const ls = g.coordinates.map(clipCoords).filter((c: any) => c.length >= 2); return ls.length ? { ...g, coordinates: ls } : null; }
+    return g;
+  };
+  if (geojson.type === "FeatureCollection") {
+    const feats = (geojson.features as GeoJSON.Feature[]).map((f) => { const g = clipGeom(f.geometry); return g ? { ...f, geometry: g } : null; }).filter(Boolean);
+    return { ...geojson, features: feats } as GeoJSON.GeoJSON;
+  }
+  if (geojson.type === "Feature") { const g = clipGeom((geojson as GeoJSON.Feature).geometry); return g ? { ...geojson, geometry: g } as GeoJSON.GeoJSON : null; }
+  return geojson;
 }
 
 export default function App() {
@@ -91,13 +119,13 @@ export default function App() {
     return [...byId.values()];
   }, [runs, serverRuns]);
 
-  const onOpenGallery = useCallback(async () => {
-    try {
-      const { runs: gs } = await api.gallery();
-      setServerRuns(gs.map(galleryItemToRun));
-    } catch { /* offline — show device runs only */ }
+  const onOpenGallery = useCallback(() => {
     setGalleryOpen(true);
+    // Refresh server gallery in background; modal opens immediately with cached/local runs.
+    api.gallery().then(({ runs: gs }) => setServerRuns(gs.map(galleryItemToRun))).catch(() => {});
   }, [galleryItemToRun]);
+  const [serverSynced, setServerSynced] = useState(true);
+  const [syncFlash, setSyncFlash] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [remVisible, setRemVisible] = useState(true);
   const [pickMode, setPickMode] = useState(false);
@@ -159,6 +187,25 @@ export default function App() {
 
   // Manual override: snapshot the current view immediately (user picked the frame).
   const onRecaptureThumb = useCallback((runId: string) => drawThumb(runId), [drawThumb]);
+
+  const onSyncServer = useCallback(async () => {
+    if (!activeRunId) return;
+    const c = mapRef.current?.getCanvas();
+    const dataUrl = c ? c.toDataURL("image/jpeg", 0.6) : "";
+    const run = listRuns().find((r) => r.id === activeRunId);
+    const sym = run ? {
+      ramp: run.ramp, reverse: run.reverse, transparent: run.transparent,
+      hillshade: run.hillshade, base: run.base, layer: run.layer,
+      min: run.min, max: run.max, log: run.log,
+      demMin: run.demMin, demMax: run.demMax, demLog: run.demLog,
+      sliderLo: run.sliderLo, sliderHi: run.sliderHi,
+    } : null;
+    try {
+      await api.thumb(activeRunId, dataUrl, run?.name ?? null, sym);
+      setServerSynced(true); setSyncFlash(true);
+      setTimeout(() => setSyncFlash(false), 3000);
+    } catch { /* offline */ }
+  }, [activeRunId]);
 
   // Load saved runs + rehydrate a shared COG from the URL (once).
   useEffect(() => {
@@ -231,6 +278,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.sliderLo, opts.sliderHi, opts.min, opts.max, opts.log, layer, activeRunId]);
 
+  // Track desync: when symbology opts change and we have a server run active, mark as unsynced.
+  useEffect(() => {
+    if (activeRunId && opts.engine === "server") setServerSynced(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.min, opts.max, opts.log, opts.sliderLo, opts.sliderHi]);
+
   // Keep the active run's thumbnail in sync with its current styling (debounced,
   // and only once the map is idle). Manual camera capture still works on top.
   const thumbTimer = useRef<number | null>(null);
@@ -244,25 +297,57 @@ export default function App() {
 
   const onPreview = useCallback(async () => {
     if (!bboxRef.current) return;
+    // Clear any loaded layer so the new preview is unambiguous.
+    setResult(null); setRiverPoints(null); setActiveRunId(null);
     setBusy(true);
     try {
-      const r = await fetchLongestRiver(bboxRef.current.bbox, opts.osm);
-      setCenterline(r.geojson);
-      setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
+      const bbox = bboxRef.current.bbox;
+      if (opts.qleverMode === "all" && opts.osm.includes("qlever")) {
+        const rivers = await fetchAllRivers(bbox, opts.osm);
+        if (rivers.length === 0) throw new Error("No rivers found");
+        const allFeatures = rivers.flatMap((r) => (r.geojson as GeoJSON.FeatureCollection).features);
+        const merged: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: allFeatures };
+        setCenterline(merged);
+        setCenterInfo({ river_name: `${rivers.length} rivers`, river_length_m: rivers.reduce((s, r) => s + r.length_m, 0) });
+      } else {
+        const r = await fetchLongestRiver(bbox, opts.osm);
+        setCenterline(r.geojson);
+        setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
+      }
     } catch (e) { alert(`No river found: ${(e as Error).message}`); }
     finally { setBusy(false); }
-  }, [opts.osm]);
+  }, [opts.osm, opts.qleverMode]);
 
   const onDrawn = useCallback((g: GeoJSON.GeoJSON) => { setCenterline(mergeFeatureCollection(g)); setCenterInfo(null); }, []);
+  const onCropToViewport = useCallback(() => {
+    if (!bboxRef.current || !centerline) return;
+    const cropped = cropCenterline(centerline, bboxRef.current.bbox, 0.1);
+    if (cropped) setCenterline(cropped);
+  }, [centerline]);
 
   const onImport = useCallback(async (f: File) => {
     setBusy(true);
     try {
-      if (/\.(geojson|json)$/i.test(f.name)) {
-        setCenterline(mergeFeatureCollection(JSON.parse(await f.text())));
-        setUploadId(null); setCenterInfo(null); setOpts({ mode: "geojson" });
-      } else {
-        const r = await api.upload(f); setUploadId(r.upload_id); setCenterline(null); setOpts({ mode: "shapefile" });
+      const parsed = JSON.parse(await f.text()) as GeoJSON.GeoJSON;
+      const fc: GeoJSON.FeatureCollection =
+        parsed.type === "FeatureCollection" ? parsed :
+        parsed.type === "Feature" ? { type: "FeatureCollection", features: [parsed as GeoJSON.Feature] } :
+        { type: "FeatureCollection", features: [] };
+      setCenterline(fc);
+      setUploadId(null); setCenterInfo(null); setOpts({ mode: "geojson" });
+      // Fly to the imported geometry's extent.
+      const coords: number[][] = [];
+      for (const feat of fc.features) {
+        const g = feat.geometry;
+        if (g?.type === "LineString") coords.push(...g.coordinates);
+        else if (g?.type === "MultiLineString") for (const ls of g.coordinates) coords.push(...ls);
+      }
+      if (coords.length > 0 && mapRef.current) {
+        const lngs = coords.map((c) => c[0]), lats = coords.map((c) => c[1]);
+        mapRef.current.fitBounds(
+          [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)] as [number, number, number, number],
+          { padding: 60, duration: 600, maxZoom: 14 },
+        );
       }
     } catch (e) { alert(`Import failed: ${(e as Error).message}`); }
     finally { setBusy(false); }
@@ -328,7 +413,8 @@ export default function App() {
         let cl = centerline;
         if (opts.mode !== "shapefile" && !cl) {
           const r = await fetchLongestRiver(bboxRef.current.bbox, opts.osm);
-          cl = r.geojson; setCenterline(r.geojson);
+          const cropped = cropCenterline(r.geojson, bboxRef.current.bbox, 0.1) ?? r.geojson;
+          cl = cropped; setCenterline(cropped);
           setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
         }
         setPhase("Sampling river"); setPct(45);
@@ -366,7 +452,8 @@ export default function App() {
       let cl = centerline;
       if (opts.mode !== "shapefile" && !cl) {
         const r = await fetchLongestRiver(bboxRef.current.bbox, opts.osm);
-        cl = r.geojson; setCenterline(r.geojson);
+        const cropped = cropCenterline(r.geojson, bboxRef.current.bbox, 0.1) ?? r.geojson;
+        cl = cropped; setCenterline(cropped);
         setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
       }
       const usingShp = opts.mode === "shapefile" && uploadId;
@@ -389,6 +476,7 @@ export default function App() {
       if (!cl && res.centerline_url) { const g = await api.centerline(res.centerline_url); if (g) setCenterline(g); }
       setResNote(resolutionNote(res, bboxRef.current.zoom, opts.res));
       const id = await recordRun(res, remB, demB);
+      setServerSynced(true);
       setFitSignal((n) => n + 1);
       captureThumb(id);
     } catch (e) { alert(`Compute failed: ${(e as Error).message}`); }
@@ -513,6 +601,13 @@ export default function App() {
 
   const onPick = useCallback(async (lng: number, lat: number) => {
     if (!result) return;
+    if (opts.engine === "client") {
+      const z = bboxRef.current?.zoom ?? clientMaxZoom;
+      const demZoom = Math.min(clientMaxZoom, Math.max(10, Math.round(z) + 1));
+      const { dem, rem } = await sampleAt(lng, lat, demZoom);
+      setPick({ lng, lat, rem, dem });
+      return;
+    }
     const remP = cogPath(result.cog_url);
     const demP = result.dem_url ? cogPath(result.dem_url) : null;
     const [rem, dem] = await Promise.all([
@@ -520,7 +615,7 @@ export default function App() {
       demP ? api.sample(demP, lng, lat).then((r) => r.value).catch(() => null) : Promise.resolve(null),
     ]);
     setPick({ lng, lat, rem, dem });
-  }, [result]);
+  }, [result, opts.engine, clientMaxZoom]);
 
   const [geoHits, setGeoHits] = useState<GeoHit[]>([]);
   const geoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -541,6 +636,12 @@ export default function App() {
     mapRef.current?.flyTo({ center: [lng, lat], zoom: Math.max(mapRef.current.getZoom(), 12), duration: 500 });
   }, []);
 
+  const onFitBounds = useCallback(() => {
+    const b = activeRem.bounds;
+    if (!b || b.length < 4 || !mapRef.current) return;
+    mapRef.current.fitBounds(b as [number, number, number, number], { padding: 40, duration: 600 });
+  }, [activeRem.bounds]);
+
   return (
     <div className="relative h-full w-full">
       <MapView
@@ -550,7 +651,13 @@ export default function App() {
         cogBounds={result?.bounds ?? null}
         fitSignal={fitSignal}
         theme={ui.theme}
-        preview={centerline}
+        preview={result ? null : centerline}
+        riverGeojson={result ? centerline : null}
+        showContours={opts.showContours}
+        isDemMode={layer === "dem"}
+        showRiver={opts.showRiver}
+        showSamples={opts.showSamples}
+        showViewport={opts.showViewport}
         engine={opts.engine}
         riverPoints={riverPoints}
         idwPower={opts.power}
@@ -607,6 +714,11 @@ export default function App() {
           onTogglePick={() => setPickMode((v) => !v)}
           onGeocode={onGeocode}
           onFlyTo={onFlyTo}
+          onCropToViewport={onCropToViewport}
+          onFitBounds={onFitBounds}
+          serverSynced={serverSynced}
+          syncFlash={syncFlash}
+          onSyncServer={onSyncServer}
         />
       </div>
       <GalleryModal

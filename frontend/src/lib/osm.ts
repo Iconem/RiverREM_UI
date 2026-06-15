@@ -118,6 +118,31 @@ function pickLongest(features: NamedLine[]): RiverResult {
   };
 }
 
+/** Return all named waterways in the bbox, grouped by name (one RiverResult per name). */
+export async function fetchAllRivers(bbox: BBox, endpoint?: string): Promise<RiverResult[]> {
+  const isQlever = !!endpoint && /qlever|sparql/i.test(endpoint);
+  let features: NamedLine[];
+  if (isQlever) {
+    try { features = await fetchQlever(bbox, endpoint!); }
+    catch { features = await fetchOverpass(bbox, undefined); }
+  } else {
+    features = await fetchOverpass(bbox, endpoint);
+  }
+  const byName = new Map<string, NamedLine[]>();
+  for (const f of features) {
+    const name = (f.properties as any)?.name;
+    if (!name || (f.geometry as any)?.type !== "LineString") continue;
+    const arr = byName.get(name) ?? [];
+    arr.push(f);
+    byName.set(name, arr);
+  }
+  return [...byName.entries()].map(([name, fs]) => ({
+    geojson: mergeFeatureCollection({ type: "FeatureCollection", features: fs }),
+    name,
+    length_m: fs.reduce((s, f) => s + lineLength((f.geometry as any).coordinates as LngLat[]), 0),
+  }));
+}
+
 // --- Overpass QL ---
 async function fetchOverpass(bbox: BBox, endpoint?: string): Promise<NamedLine[]> {
   const q =

@@ -108,7 +108,7 @@ function encodeTerrarium(elev: number): [number, number, number] {
   return [c(r), c(g), c(b)];
 }
 
-async function buildREMTile(z: number, x: number, y: number): Promise<ArrayBuffer> {
+export async function buildREMTile(z: number, x: number, y: number): Promise<ArrayBuffer> {
   const key = `${z}/${x}/${y}`;
   const cached = tileCache.get(key);
   if (cached) return cached;
@@ -127,11 +127,15 @@ async function buildREMTile(z: number, x: number, y: number): Promise<ArrayBuffe
     for (let px = 0; px < sz; px++) {
       let demElev = 0;
       if (demData) {
-        const sx = Math.min(511, Math.round((px * 512) / sz));
-        const sy = Math.min(511, Math.round((py * 512) / sz));
-        const i4 = (sy * 512 + sx) * 4;
+        // 2×2 box-average over the 4 DEM pixels that map to this output pixel.
+        // Averages out WebP lossy-compression quantization noise (±1 byte on G = ±1 m speckle).
         const d = demData.data;
-        demElev = d[i4] * 256 + d[i4 + 1] + d[i4 + 2] / 256 - 32768;
+        const terr = (x: number, y: number) => {
+          const i4 = (Math.min(511, y) * 512 + Math.min(511, x)) * 4;
+          return d[i4] * 256 + d[i4 + 1] + d[i4 + 2] / 256 - 32768;
+        };
+        const x0 = (px * 512) / sz | 0, y0 = (py * 512) / sz | 0;
+        demElev = (terr(x0, y0) + terr(x0 + 1, y0) + terr(x0, y0 + 1) + terr(x0 + 1, y0 + 1)) / 4;
       }
       let wse = 0;
       if (havePts) {
@@ -265,6 +269,17 @@ export async function sampleRiverPoints(
     if (elev !== null) pts.push({ mx: lonToMx(lon), my: latToMy(lat), elev });
   }
   return pts;
+}
+
+/**
+ * Sample DEM and REM elevations at a specific point for the inspect picker.
+ * Uses the same IDW WSE field as the tile renderer so values match the displayed REM.
+ */
+export async function sampleAt(lon: number, lat: number, demZoom: number): Promise<{ dem: number | null; rem: number | null }> {
+  const dem = await getElevation(lon, lat, demZoom);
+  if (dem === null) return { dem: null, rem: null };
+  const wse = riverPts.length > 0 ? idwValue(lonToMx(lon), latToMy(lat)) : 0;
+  return { dem, rem: +(dem - wse).toFixed(3) };
 }
 
 /** Flatten / inflate points for compact run persistence. */
