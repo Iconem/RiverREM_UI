@@ -365,23 +365,26 @@ async function loadTileImage(z,x,y){
   const resp=await fetch(url);
   if(!resp.ok)throw new Error(`DEM tile ${url} → ${resp.status}`);
   const blob=await resp.blob();
-  let data;
+  let data=null;
+  // WebCodecs: decode WebP straight to raw RGBA — NO canvas, so no sRGB / premultiplied-
+  // alpha rounding that would corrupt the terrarium elevation bytes (±1 m speckle).
   if(typeof ImageDecoder!=='undefined'){
-    // WebCodecs: decode WebP straight to raw RGBA — NO canvas, so no sRGB / premultiplied-
-    // alpha rounding that would corrupt the terrarium elevation bytes (±1 m speckle).
-    const dec=new ImageDecoder({data:await blob.arrayBuffer(),type:blob.type||'image/webp'});
-    const {image}=await dec.decode();
-    const sz=image.codedWidth;
-    const raw=new Uint8Array(image.allocationSize({format:'RGBA'}));
-    const layout=await image.copyTo(raw,{format:'RGBA'});
-    const stride=(layout&&layout[0]&&layout[0].stride)||sz*4;
-    const out=new Uint8ClampedArray(sz*sz*4);
-    if(stride===sz*4)out.set(raw.subarray(0,sz*sz*4));
-    else for(let r=0;r<sz;r++)out.set(raw.subarray(r*stride,r*stride+sz*4),r*sz*4);
-    image.close&&image.close();dec.close&&dec.close();
-    data={data:out};
-  }else{
-    // Fallback (Firefox/Safari): minimise corruption with colorSpaceConversion:"none".
+    try{
+      const dec=new ImageDecoder({data:await blob.arrayBuffer(),type:blob.type||'image/webp'});
+      const {image}=await dec.decode();
+      const sz=image.codedWidth;
+      const raw=new Uint8Array(image.allocationSize({format:'RGBA'}));
+      const layout=await image.copyTo(raw,{format:'RGBA'});
+      const stride=(layout&&layout[0]&&layout[0].stride)||sz*4;
+      const out=new Uint8ClampedArray(sz*sz*4);
+      if(stride===sz*4)out.set(raw.subarray(0,sz*sz*4));
+      else for(let r=0;r<sz;r++)out.set(raw.subarray(r*stride,r*stride+sz*4),r*sz*4);
+      image.close&&image.close();dec.close&&dec.close();
+      data={data:out};
+    }catch(e){data=null;}
+  }
+  if(!data){
+    // Fallback: canvas decode with colorSpaceConversion:"none" (minimises corruption).
     const bm=await createImageBitmap(blob,{colorSpaceConversion:'none',premultiplyAlpha:'none'});
     const c=new OffscreenCanvas(bm.width,bm.height);
     const ctx=c.getContext('2d',{willReadFrequently:true});
@@ -618,14 +621,26 @@ function encodeTerrarium(elev){
 // Encode the output tile with fast-png (only IHDR/IDAT/IEND — no sRGB/gAMA/iCCP chunk,
 // zlib level 0). canvas.convertToBlob tags the PNG sRGB, which makes maplibre's raster-dem
 // worker re-gamma-correct the terrarium bytes on decode and reintroduce ±1 m speckle.
-let _fastpng=null;
-async function _loadFastpng(){ if(!_fastpng) _fastpng=await import('https://esm.sh/fast-png@8'); return _fastpng; }
+let _fastpng=null, _fastpngTried=false;
+async function _loadFastpng(){
+  if(_fastpng||_fastpngTried) return _fastpng;
+  _fastpngTried=true;
+  try{ _fastpng=await import('https://esm.sh/fast-png@8'); }catch(e){ _fastpng=null; }
+  return _fastpng;
+}
 async function encodePngTile(rgba,w,h){
-  const {encode}=await _loadFastpng();
-  const rgb=new Uint8Array(w*h*3);
-  for(let i=0,j=0;i<w*h;i++){const s=i*4;rgb[j++]=rgba[s];rgb[j++]=rgba[s+1];rgb[j++]=rgba[s+2];}
-  const png=encode({width:w,height:h,data:rgb,channels:3,depth:8},{zlib:{level:0}});
-  const out=new Uint8Array(png.byteLength);out.set(png);return out.buffer;
+  const fp=await _loadFastpng();
+  if(fp&&fp.encode){
+    const rgb=new Uint8Array(w*h*3);
+    for(let i=0,j=0;i<w*h;i++){const s=i*4;rgb[j++]=rgba[s];rgb[j++]=rgba[s+1];rgb[j++]=rgba[s+2];}
+    const png=fp.encode({width:w,height:h,data:rgb,channels:3,depth:8},{zlib:{level:0}});
+    const out=new Uint8Array(png.byteLength);out.set(png);return out.buffer;
+  }
+  // Fallback: canvas PNG (sRGB-tagged → mild speckle, but never broken if esm.sh is unreachable).
+  const c=new OffscreenCanvas(w,h);
+  const ctx=c.getContext('2d');
+  const id=ctx.createImageData(w,h); id.data.set(rgba); ctx.putImageData(id,0,0);
+  return (await c.convertToBlob({type:'image/png'})).arrayBuffer();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
