@@ -16,7 +16,7 @@
 import maplibregl from "maplibre-gl";
 import { encode as encodePngFast } from "fast-png";
 
-export type RiverPoint = { mx: number; my: number; elev: number };
+export type RiverPoint = { mx: number; my: number; elev: number; lineId?: number };
 
 const MAPTERHORN = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
 const R_MERC = 6378137;
@@ -24,6 +24,7 @@ const R_MERC = 6378137;
 // ── module state used by the rem:// protocol ───────────────────────────────
 let riverPts: RiverPoint[] = [];
 let idwPower = 1;
+let interpMode: "idw" | "jfa" | "edt" = "idw";
 let registered = false;
 // Deepest Mapterhorn zoom known to exist for the current area (probed). buildREMTile
 // never fetches a DEM tile above this — it overzoom-samples the parent instead — so
@@ -229,28 +230,202 @@ function idwValue(qMx: number, qMy: number): number {
 }
 
 // ── Pre-computed WSE grid (eliminates inter-zoom DEM inconsistency) ──
-// IDW is evaluated once on a coarse grid and bilinearly interpolated at tile-render time.
+// Evaluated once on a coarse grid and bilinearly interpolated at tile-render time.
+// Three modes: IDW, JFA (nearest-point-on-polyline), EDT (rasterize + F-H 2-pass).
 type WseGrid = { data: Float32Array; w: number; h: number; mx0: number; my0: number; mx1: number; my1: number };
 let wseGrid: WseGrid | null = null;
 
 const GRID_SZ = 256;
 
-function buildWseGrid(pts: RiverPoint[]): WseGrid | null {
-  if (pts.length === 0) return null;
+function gridExtent(pts: RiverPoint[], margin: number) {
   const xs = pts.map((p) => p.mx), ys = pts.map((p) => p.my);
-  const margin = 8000; // 8 km padding around the river
-  const mx0 = Math.min(...xs) - margin, mx1 = Math.max(...xs) + margin;
-  const my0 = Math.min(...ys) - margin, my1 = Math.max(...ys) + margin;
+  return {
+    mx0: Math.min(...xs) - margin, mx1: Math.max(...xs) + margin,
+    my0: Math.min(...ys) - margin, my1: Math.max(...ys) + margin,
+  };
+}
+
+function buildWseGridIDW(pts: RiverPoint[]): WseGrid | null {
+  if (pts.length === 0) return null;
+  const { mx0, mx1, my0, my1 } = gridExtent(pts, 8000);
   const w = GRID_SZ, h = GRID_SZ;
   const raw = new Float32Array(w * h);
   for (let yi = 0; yi < h; yi++) {
     for (let xi = 0; xi < w; xi++) {
-      const mx = mx0 + (xi / (w - 1)) * (mx1 - mx0);
-      const my = my0 + (yi / (h - 1)) * (my1 - my0);
-      raw[yi * w + xi] = idwValue(mx, my);
+      raw[yi * w + xi] = idwValue(
+        mx0 + (xi / (w - 1)) * (mx1 - mx0),
+        my0 + (yi / (h - 1)) * (my1 - my0),
+      );
     }
   }
   return { data: raw, w, h, mx0, my0, mx1, my1 };
+}
+
+// ── JFA mode: nearest-point-on-polyline (labeled EDT / Voronoi) ───────────
+// For each grid cell, project onto every river segment, keep the closest projection,
+// and linearly interpolate the sampled WSE at the projection parameter t.
+// This is the physically-correct hydrological model: WSE varies only along the river,
+// producing clean cross-channel bands with no IDW bull's-eyes.
+function buildWseGridNearest(pts: RiverPoint[]): WseGrid | null {
+  if (pts.length === 0) return null;
+  const { mx0, mx1, my0, my1 } = gridExtent(pts, 8000);
+  const w = GRID_SZ, h = GRID_SZ;
+  const data = new Float32Array(w * h);
+
+  if (pts.length === 1) { data.fill(pts[0].elev); return { data, w, h, mx0, my0, mx1, my1 }; }
+
+  const dMx = (mx1 - mx0) / (w - 1);
+  const dMy = (my1 - my0) / (h - 1);
+  const nSeg = pts.length - 1;
+
+  for (let yi = 0; yi < h; yi++) {
+    const qy = my0 + yi * dMy;
+    for (let xi = 0; xi < w; xi++) {
+      const qx = mx0 + xi * dMx;
+      let bestDist2 = Infinity, bestElev = pts[0].elev;
+
+      for (let i = 0; i < nSeg; i++) {
+        // Skip segments that cross a line boundary (separate tributaries)
+        if (pts[i].lineId !== undefined && pts[i].lineId !== pts[i + 1].lineId) continue;
+        const ax = pts[i].mx, ay = pts[i].my, bx = pts[i + 1].mx, by = pts[i + 1].my;
+        const dx = bx - ax, dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        let t = 0;
+        if (len2 > 0) { t = ((qx - ax) * dx + (qy - ay) * dy) / len2; t = t < 0 ? 0 : t > 1 ? 1 : t; }
+        const px = ax + t * dx, py = ay + t * dy;
+        const dist2 = (qx - px) * (qx - px) + (qy - py) * (qy - py);
+        if (dist2 < bestDist2) {
+          bestDist2 = dist2;
+          bestElev = pts[i].elev + t * (pts[i + 1].elev - pts[i].elev);
+        }
+      }
+
+      // Fallback to nearest point (handles single-point rivers or all-cross-line pts)
+      if (bestDist2 === Infinity) {
+        for (const pt of pts) {
+          const d2 = (qx - pt.mx) * (qx - pt.mx) + (qy - pt.my) * (qy - pt.my);
+          if (d2 < bestDist2) { bestDist2 = d2; bestElev = pt.elev; }
+        }
+      }
+
+      data[yi * w + xi] = bestElev;
+    }
+  }
+
+  return { data, w, h, mx0, my0, mx1, my1 };
+}
+
+// ── EDT mode: rasterize polyline → labeled Felzenszwalb-Huttenlocher 2-pass EDT ──
+// Burns the centerline into the grid with lerped WSE per cell (Bresenham-style),
+// then runs an exact O(cells) 2-pass distance transform: column-wise 1D nearest-seed
+// (Phase 1) then row-wise 1D Voronoi via parabola lower envelope (Phase 2).
+// Slightly aliased vs nearest-polyline (JFA) at the grid resolution, but O(cells)
+// vs O(cells × segments) — advantageous when raising GRID_SZ.
+function buildWseGridEDT(pts: RiverPoint[]): WseGrid | null {
+  if (pts.length === 0) return null;
+  const { mx0, mx1, my0, my1 } = gridExtent(pts, 8000);
+  const w = GRID_SZ, h = GRID_SZ;
+  const dMx = (mx1 - mx0) / (w - 1), dMy = (my1 - my0) / (h - 1);
+
+  // Step 1: burn river segments into seed grid (NaN = no seed)
+  const seedWse = new Float32Array(w * h).fill(NaN);
+  if (pts.length === 1) {
+    const xi = Math.round((pts[0].mx - mx0) / dMx);
+    const yi = Math.round((pts[0].my - my0) / dMy);
+    if (xi >= 0 && xi < w && yi >= 0 && yi < h) seedWse[yi * w + xi] = pts[0].elev;
+  } else {
+    for (let i = 0; i < pts.length - 1; i++) {
+      if (pts[i].lineId !== undefined && pts[i].lineId !== pts[i + 1].lineId) continue;
+      const gax = (pts[i].mx - mx0) / dMx, gay = (pts[i].my - my0) / dMy;
+      const gbx = (pts[i + 1].mx - mx0) / dMx, gby = (pts[i + 1].my - my0) / dMy;
+      const steps = Math.ceil(Math.hypot(gbx - gax, gby - gay)) + 1;
+      for (let s = 0; s <= steps; s++) {
+        const t = steps > 0 ? s / steps : 0;
+        const xi = Math.round(gax + t * (gbx - gax));
+        const yi = Math.round(gay + t * (gby - gay));
+        if (xi >= 0 && xi < w && yi >= 0 && yi < h)
+          seedWse[yi * w + xi] = pts[i].elev + t * (pts[i + 1].elev - pts[i].elev);
+      }
+    }
+  }
+
+  // Phase 1: column-wise 1D nearest seed row
+  // colG[y*w+x] = row of nearest seed in column x for row y  (-1 = none)
+  const colG = new Int32Array(w * h).fill(-1);
+  for (let xi = 0; xi < w; xi++) {
+    let last = -1;
+    for (let yi = 0; yi < h; yi++) {
+      if (!isNaN(seedWse[yi * w + xi])) last = yi;
+      colG[yi * w + xi] = last;
+    }
+    last = -1;
+    for (let yi = h - 1; yi >= 0; yi--) {
+      if (!isNaN(seedWse[yi * w + xi])) last = yi;
+      if (last >= 0) {
+        const prev = colG[yi * w + xi];
+        if (prev < 0 || Math.abs(yi - last) < Math.abs(yi - prev)) colG[yi * w + xi] = last;
+      }
+    }
+  }
+
+  // Phase 2: row-wise 1D Voronoi — lower envelope of parabolas (Felzenszwalb-Huttenlocher)
+  // For row y, each column x' with a seed contributes parabola f_{x'}(q) = (q-x')² + |y-colG[y,x']|²
+  // We find the minimising source for each query column q.
+  const data = new Float32Array(w * h);
+  const envSrc = new Int32Array(w);   // source columns in the lower envelope
+  const envSep = new Float32Array(w); // envSep[i] = x where we switch from parabola i-1 to i
+
+  for (let yi = 0; yi < h; yi++) {
+    let k = 0;
+    for (let xi = 0; xi < w; xi++) {
+      const sr = colG[yi * w + xi];
+      if (sr < 0) continue;
+      const d = Math.abs(yi - sr);
+      // Add parabola at xi, popping predecessors it dominates
+      while (k >= 1) {
+        const prev = envSrc[k - 1];
+        const prevD = Math.abs(yi - colG[yi * w + prev]);
+        // Crossing of parabola prev and xi: (q-prev)²+prevD² = (q-xi)²+d²
+        const xover = (xi * xi - prev * prev + d * d - prevD * prevD) / (2 * (xi - prev));
+        if (k === 1 || xover > envSep[k - 1]) { envSep[k] = xover; envSrc[k] = xi; k++; break; }
+        k--;
+      }
+      if (k === 0) { envSep[0] = -Infinity; envSrc[0] = xi; k = 1; }
+    }
+
+    if (k === 0) {
+      // No seeds in any column — nearest-point fallback
+      for (let xi = 0; xi < w; xi++) {
+        const qx = mx0 + xi * dMx, qy = my0 + yi * dMy;
+        let bestD2 = Infinity, bestE = pts[0].elev;
+        for (const pt of pts) {
+          const d2 = (qx - pt.mx) ** 2 + (qy - pt.my) ** 2;
+          if (d2 < bestD2) { bestD2 = d2; bestE = pt.elev; }
+        }
+        data[yi * w + xi] = bestE;
+      }
+      continue;
+    }
+
+    let j = 0;
+    for (let xi = 0; xi < w; xi++) {
+      while (j < k - 1 && xi > envSep[j + 1]) j++;
+      const srcX = envSrc[j], srcY = colG[yi * w + srcX];
+      data[yi * w + xi] = seedWse[srcY * w + srcX];
+    }
+  }
+
+  return { data, w, h, mx0, my0, mx1, my1 };
+}
+
+function buildWseGrid(pts: RiverPoint[]): WseGrid | null {
+  const t0 = performance.now();
+  const result = interpMode === "jfa" ? buildWseGridNearest(pts)
+               : interpMode === "edt" ? buildWseGridEDT(pts)
+               : buildWseGridIDW(pts);
+  _perf.wseGridMs = performance.now() - t0;
+  _perf.wseMode = interpMode;
+  return result;
 }
 
 function sampleWse(mx: number, my: number): number {
@@ -281,7 +456,8 @@ export async function buildREMTile(z: number, x: number, y: number): Promise<Arr
   const cached = tileCache.get(key);
   // maplibre-contour transfers (detaches) the returned ArrayBuffer to its worker,
   // so hand out a fresh copy each time — the cached original must stay intact.
-  if (cached) return cached.slice(0);
+  if (cached) { _perf.cacheHits++; return cached.slice(0); }
+  const _t0 = performance.now();
 
   const outSz = 256; // output tile resolution
 
@@ -305,6 +481,7 @@ export async function buildREMTile(z: number, x: number, y: number): Promise<Arr
   const lonW = tile2lon(x, z), lonE = tile2lon(x + 1, z);
   const latN = tile2lat(y, z), latS = tile2lat(y + 1, z);
   const havePts = riverPts.length > 0;
+  const _t1 = performance.now(); // DEM fetch done
 
   const rgba = new Uint8ClampedArray(outSz * outSz * 4);
 
@@ -341,9 +518,33 @@ export async function buildREMTile(z: number, x: number, y: number): Promise<Arr
       rgba[i] = r; rgba[i + 1] = g; rgba[i + 2] = b; rgba[i + 3] = 255;
     }
   }
+  const _t2 = performance.now(); // pixel loop done
   const buf = await encodePng(rgba, outSz, outSz);
+  const _t3 = performance.now(); // PNG encode done
+  _perf.tileCount++;
+  const tileMs = _t3 - _t0;
+  _perf.lastTile = { demFetchMs: _t1 - _t0, pixelLoopMs: _t2 - _t1, pngEncodeMs: _t3 - _t2, totalMs: tileMs };
+  _perf.avgTileMs = _perf.avgTileMs === null ? tileMs : _perf.avgTileMs * 0.9 + tileMs * 0.1;
   tileCache.set(key, buf);
   return buf.slice(0); // copy — the cached original must survive worker transfer
+}
+
+// ── Perf stats ────────────────────────────────────────────────────────────────
+export type RemTilePerf = { demFetchMs: number; pixelLoopMs: number; pngEncodeMs: number; totalMs: number };
+export type RemPerfStats = {
+  wseGridMs: number | null;
+  wseMode: string;
+  tileCount: number;
+  cacheHits: number;
+  cacheSize: number;
+  lastTile: RemTilePerf | null;
+  avgTileMs: number | null;
+};
+let _perf: Omit<RemPerfStats, "cacheSize"> = {
+  wseGridMs: null, wseMode: "idw", tileCount: 0, cacheHits: 0, lastTile: null, avgTileMs: null,
+};
+export function getRemPerfStats(): RemPerfStats {
+  return { ..._perf, cacheSize: tileCache.size };
 }
 
 // ── public API ──────────────────────────────────────────────────────────────
@@ -358,10 +559,11 @@ export function ensureRemProtocol() {
   registered = true;
 }
 
-/** Swap the river points / IDW power, rebuild the WSE grid, and invalidate cached tiles. */
-export function setRemParams(pts: RiverPoint[], power: number) {
+/** Swap the river points / IDW power / interpolation mode, rebuild the WSE grid, and invalidate cached tiles. */
+export function setRemParams(pts: RiverPoint[], power: number, interp: "idw" | "jfa" | "edt" = "idw") {
   riverPts = pts;
   idwPower = power;
+  interpMode = interp;
   tileCache.clear();
   wseGrid = buildWseGrid(pts);
 }
@@ -448,15 +650,15 @@ export async function sampleRiverPoints(
   if (lines.length === 0) return [];
   const lens = lines.map((c) => { let l = 0; for (let i = 1; i < c.length; i++) l += haversine(c[i - 1][1], c[i - 1][0], c[i][1], c[i][0]); return l; });
   const total = lens.reduce((a, b) => a + b, 0) || 1;
-  const samples: LngLat[] = [];
+  const samples: [number, number, number][] = []; // [lon, lat, lineId]
   for (let i = 0; i < lines.length; i++) {
     const count = Math.max(1, Math.round((nSamples * lens[i]) / total));
-    samples.push(...sampleAlongLine(lines[i], count));
+    for (const [lon, lat] of sampleAlongLine(lines[i], count)) samples.push([lon, lat, i]);
   }
   const pts: RiverPoint[] = [];
-  for (const [lon, lat] of samples.slice(0, nSamples)) {
+  for (const [lon, lat, lineId] of samples.slice(0, nSamples)) {
     const elev = await getElevation(lon, lat, demZoom);
-    if (elev !== null) pts.push({ mx: lonToMx(lon), my: latToMy(lat), elev });
+    if (elev !== null) pts.push({ mx: lonToMx(lon), my: latToMy(lat), elev, lineId });
   }
   return pts;
 }

@@ -5,7 +5,7 @@ import { SidePanel } from "@/components/SidePanel";
 import { useMapView, useRemOptions, useActiveRem, useUiState } from "@/lib/state";
 import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit, type GalleryItem } from "@/lib/api";
 import { fetchLongestRiver, fetchAllRivers, fetchAllWaterways, mergeFeatureCollection } from "@/lib/osm";
-import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, sampleAt, sampleDemBounds, type RiverPoint } from "@/lib/remClient";
+import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, sampleAt, sampleDemBounds, getRemPerfStats, type RiverPoint, type RemPerfStats } from "@/lib/remClient";
 import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
 import GalleryModal from "@/components/GalleryModal";
 
@@ -138,6 +138,8 @@ export default function App() {
   const [resNote, setResNote] = useState<string | null>(null); // resolution-cap note from last build
   const [riverPoints, setRiverPoints] = useState<RiverPoint[] | null>(null); // client engine WSE points
   const [remToken, setRemToken] = useState(0); // bump to force the client rem:// source to rebuild
+  const [fps, setFps] = useState<number | null>(null);
+  const [remPerf, setRemPerf] = useState<RemPerfStats | null>(null);
   const [demCogUrl, setDemCogUrl] = useState(""); // optional DEM COG for the server engine
   const [clientMaxZoom, setClientMaxZoom] = useState(14); // probed deepest Mapterhorn zoom (client engine)
 
@@ -505,7 +507,7 @@ export default function App() {
         // Sample a viewport DEM grid to compute 5th/95th percentile for DEM mode bounds.
         const demGrid = await sampleDemBounds(bboxRef.current.bbox, demZoom);
         const demB: Bounds | null = demGrid ? { min: demGrid.min, max: demGrid.max, log: false } : null;
-        setRiverPoints(pts); setRemParams(pts, opts.power); setRemToken((n) => n + 1);
+        setRiverPoints(pts); setRemParams(pts, opts.power, opts.interp); setRemToken((n) => n + 1);
         setPct(90);
         const bb = bboxRef.current.bbox;
         const bounds: [number, number, number, number] = [bb.west, bb.south, bb.east, bb.north];
@@ -602,7 +604,7 @@ export default function App() {
     // Client runs: re-seed the sampled points so the rem:// source rebuilds offline.
     if (r.engine === "client" && r.clientPts?.length) {
       const pts = unpackPts(r.clientPts);
-      setRiverPoints(pts); setRemParams(pts, r.power ?? 2); setRemToken((n) => n + 1);
+      setRiverPoints(pts); setRemParams(pts, r.power ?? 2, opts.interp); setRemToken((n) => n + 1);
       setClientMaxZoom(r.srcMaxZoom ?? 14);
     }
     setOpts({
@@ -657,6 +659,21 @@ export default function App() {
     if (layer === "dem") setDemBounds(b); else setRemBounds(b);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.min, opts.max, opts.log]);
+
+  // When interp mode changes, rebuild the WSE grid for existing river points without re-sampling.
+  useEffect(() => {
+    if (!riverPoints || riverPoints.length === 0 || opts.engine !== "client") return;
+    setRemParams(riverPoints, opts.power, opts.interp);
+    setRemToken((n) => n + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts.interp]);
+
+  // Poll perf stats when beta mode is active.
+  useEffect(() => {
+    if (!opts.beta) { setRemPerf(null); return; }
+    const id = setInterval(() => setRemPerf(getRemPerfStats()), 500);
+    return () => clearInterval(id);
+  }, [opts.beta]);
 
   const onDeleteRun = useCallback((id: string) => { setRuns(removeRun(id)); if (id === activeRunId) setActiveRunId(null); }, [activeRunId]);
   const onRenameRun = useCallback((id: string, name: string) => setRuns(updateRun(id, { name })), []);
@@ -749,6 +766,7 @@ export default function App() {
         engine={opts.engine}
         riverPoints={riverPoints}
         idwPower={opts.power}
+        interpMode={opts.interp}
         clientMaxZoom={clientMaxZoom}
         remToken={remToken}
         remVisible={remVisible}
@@ -760,6 +778,7 @@ export default function App() {
         onMapReady={onMapReady}
         onPick={onPick}
         onTerraDrawRef={onTerraDrawRef}
+        onFps={opts.beta ? setFps : undefined}
       />
       <div className="pointer-events-none absolute inset-0">
         <SidePanel
@@ -809,6 +828,8 @@ export default function App() {
           serverSynced={serverSynced}
           syncFlash={syncFlash}
           onSyncServer={onSyncServer}
+          fps={fps}
+          remPerf={remPerf}
         />
       </div>
       <GalleryModal

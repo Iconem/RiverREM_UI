@@ -107,9 +107,9 @@ type Opts = { ramp: string; min: number; max: number; mode: string; base: string
 
 export function MapView({
   initialView, opts, cogUrl, cogBounds, fitSignal, theme, preview, remVisible, pickMode,
-  engine, riverPoints, idwPower, clientMaxZoom, remToken,
+  engine, riverPoints, idwPower, interpMode, clientMaxZoom, remToken,
   riverGeojson, showContours, showContourLabels, isDemMode, showRiver, showSamples, showViewport, pick,
-  onBounds, onView, onDrawn, onMapReady, onPick, onTerraDrawRef,
+  onBounds, onView, onDrawn, onMapReady, onPick, onTerraDrawRef, onFps,
 }: {
   initialView: { lng: number; lat: number; zoom: number };
   opts: Opts;
@@ -128,6 +128,7 @@ export function MapView({
   engine: "server" | "client";
   riverPoints: RiverPoint[] | null;
   idwPower: number;
+  interpMode: "idw" | "jfa" | "edt";
   clientMaxZoom: number;
   remToken: number;
   remVisible: boolean;
@@ -139,6 +140,7 @@ export function MapView({
   onMapReady: (map: MlMap) => void;
   onPick: (lng: number, lat: number) => void;
   onTerraDrawRef?: (draw: any | null) => void;
+  onFps?: (fps: number) => void;
 }) {
   const mapRef = useRef<MapRef | null>(null);
   const remRef = useRef<{ src: string; layer: string } | null>(null);
@@ -181,7 +183,7 @@ export function MapView({
         // Pure-JS REM engine: build the REM live per tile from sampled river points.
         if (!riverPoints || riverPoints.length === 0) return;
         ensureRemProtocol();
-        setRemParams(riverPoints, idwPower);
+        setRemParams(riverPoints, idwPower, interpMode);
         map.addSource(src, {
           type: "raster-dem",
           tiles: ["rem://tiles/{z}/{x}/{y}"],
@@ -526,6 +528,22 @@ export function MapView({
     map.on("click", handler);
     return () => { map.off("click", handler); map.getCanvas().style.cursor = ""; };
   }, [pickMode, ready, onPick]);
+
+  // FPS counter — uses MapLibre render events; only active when onFps is provided.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !ready || !onFps) return;
+    let frames = 0, last = performance.now();
+    const onRender = () => { frames++; };
+    map.on("render", onRender);
+    const id = setInterval(() => {
+      const now = performance.now();
+      const elapsed = (now - last) / 1000;
+      if (elapsed > 0) onFps(Math.round(frames / elapsed));
+      frames = 0; last = now;
+    }, 1000);
+    return () => { map.off("render", onRender); clearInterval(id); };
+  }, [ready, onFps]);
 
   // Hand-drawing with terra-draw (LineString). Exposes instance via onTerraDrawRef
   // so App.tsx can call draw.addFeatures() for imported GeoJSON files.

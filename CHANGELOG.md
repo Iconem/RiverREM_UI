@@ -7,6 +7,21 @@ sessions, so dates are approximate; the ordering is chronological.
 `0.1.0` is the initial RiverREM Python-backend app. `1.0.0` introduces the pure-frontend
 (client-side JS) REM engine. Anything before `1.0.0` is server-only.
 
+## [1.5.0] — 2026-06-16
+
+### Added
+- **Three WSE interpolation modes for the client engine** (behind `?beta=true` URL flag):
+  - **IDW** — existing inverse-distance weighting; box-blur band-aid removed now that better modes exist.
+  - **Nearest** (JFA concept) — nearest-point-on-polyline: projects each grid cell onto the closest river segment and lerps WSE at the projection parameter `t`. Exact, no bull's-eyes, correct hydrological Voronoi model. O(cells × segments).
+  - **EDT** — rasterize centreline into grid then run the exact **Felzenszwalb-Huttenlocher labeled 2-pass distance transform**: column-wise 1D nearest-seed (Phase 1) + row-wise 1D Voronoi via parabola lower envelope (Phase 2). O(cells). Faster than Nearest at higher grid resolutions (512², 1024²); slight rasterisation aliasing at 256².
+  - Multi-line rivers (`MultiLineString` / multiple waterways): `sampleRiverPoints` now tags each point with a `lineId`; Nearest and EDT skip cross-line segments so separate tributaries don't generate false diagonal bands.
+  - IDW power control hidden when Nearest or EDT is active (unused).
+- **Beta mode** (`?beta=true`) — gates experimental controls (WSE interpolation toggle) and a **per-tile performance panel**: WSE grid build time, last-tile breakdown (DEM fetch / pixel loop / PNG encode), rolling average tile time, tile cache size, and live FPS counter.
+- **`getRemPerfStats()`** — exported from `remClient.ts`; tracks WSE grid build time and per-tile timing (demFetchMs / pixelLoopMs / pngEncodeMs / totalMs) with a 10-sample EMA on average tile time.
+
+### Changed
+- Removed the 4-pass box-blur from IDW grid build (it was a band-aid for bull's-eyes; Nearest/EDT are the correct fix).
+
 ## [1.4.0] — 2026-06-16
 
 ### Fixed

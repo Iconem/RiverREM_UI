@@ -21,7 +21,7 @@ import type { ComputeResponse, GeoHit } from "@/lib/api";
 
 type Opts = {
   mode: "osm" | "geojson" | "shapefile";
-  engine: "server" | "client"; power: number; samples: number;
+  engine: "server" | "client"; power: number; interp: "idw" | "jfa" | "edt"; samples: number; beta: boolean;
   base: "dark" | "light" | "satellite" | "hillshade" | "none";
   ramp: (typeof RAMP_NAMES)[number];
   reverse: boolean; transparent: "none" | "white" | "black"; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; sliderLo: number | null; sliderHi: number | null; osm: string;
@@ -90,6 +90,8 @@ export function SidePanel(p: {
   serverSynced: boolean;
   syncFlash: boolean;
   onSyncServer: () => void;
+  fps?: number | null;
+  remPerf?: import("@/lib/remClient").RemPerfStats | null;
 }) {
   const { opts, setOpts, busy, result } = p;
   const [ui, setUi] = useUiState();
@@ -290,13 +292,30 @@ export function SidePanel(p: {
             </Tabs>
           </div>
 
-          <div className="grid grid-cols-[1fr_3fr] items-end gap-2">
-            <div className="space-y-1">
-              <div className="flex h-4 items-center"><Label>IDW power</Label></div>
-              <Input type="number" step="0.5" min="0.5" max="4" value={opts.power} className="text-xs"
-                title="Inverse-distance weighting exponent. OpenTopography/RiverREM uses 1; Dan Coe's original QGIS method uses 2. Higher = more local (closer samples dominate)."
-                onChange={(e) => setOpts({ power: Math.max(0.5, Math.min(4, parseFloat(e.target.value) || 2)) })} />
+          {opts.engine === "client" && opts.beta && (
+            <div className="flex items-center justify-between">
+              <Label>WSE interpolation</Label>
+              <Tabs value={opts.interp} onValueChange={(v) => setOpts({ interp: v as Opts["interp"] })}>
+                <TabsList className="w-auto">
+                  <TabsTrigger value="idw" className="px-3" title="Inverse-distance weighting — classic, configurable, may produce radial bull's-eyes near sample points">IDW</TabsTrigger>
+                  <TabsTrigger value="jfa" className="px-3" title="Nearest-point-on-polyline — projects each cell onto the closest river segment and lerps WSE; exact, no bull's-eyes">Nearest</TabsTrigger>
+                  <TabsTrigger value="edt" className="px-3" title="Rasterize centerline → Felzenszwalb-Huttenlocher labeled EDT — O(cells) exact Voronoi; slight raster aliasing vs Nearest but faster at high grid resolutions">EDT</TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
+          )}
+
+          <div className="grid grid-cols-[1fr_3fr] items-end gap-2">
+            {(opts.engine === "server" || opts.interp === "idw") ? ( // IDW power not used in nearest/EDT modes
+              <div className="space-y-1">
+                <div className="flex h-4 items-center"><Label>IDW power</Label></div>
+                <Input type="number" step="0.5" min="0.5" max="4" value={opts.power} className="text-xs"
+                  title="Inverse-distance weighting exponent. OpenTopography/RiverREM uses 1; Dan Coe's original QGIS method uses 2. Higher = more local (closer samples dominate)."
+                  onChange={(e) => setOpts({ power: Math.max(0.5, Math.min(4, parseFloat(e.target.value) || 2)) })} />
+              </div>
+            ) : (
+              <div />
+            )}
             {opts.engine === "client" ? (
               <div className="space-y-1">
                 <div className="flex h-4 items-center"><Label>River samples</Label></div>
@@ -318,7 +337,7 @@ export function SidePanel(p: {
 
           {opts.engine === "client" ? (
             <p className="font-mono text-[10px] leading-snug text-muted-foreground">
-              Experimental — REM is sampled &amp; built live in your browser (Mapterhorn DEM, IDW), no server compute.
+              Experimental — REM built live in the browser (Mapterhorn DEM, {opts.interp === "jfa" ? "nearest-polyline WSE" : opts.interp === "edt" ? "EDT WSE" : "IDW"}), no server compute.
             </p>
           ) : (
             <div className="space-y-1">
@@ -334,6 +353,25 @@ export function SidePanel(p: {
           <Progress active={busy} label={p.phase} pct={p.pct} />
           {!busy && p.resNote && (
             <p className="font-mono text-[10px] leading-relaxed text-amber-500/90">{p.resNote}</p>
+          )}
+
+          {opts.beta && (p.remPerf || p.fps != null) && (
+            <div className="rounded border border-border/40 bg-muted/30 px-2 py-1.5 font-mono text-[10px] leading-snug text-muted-foreground">
+              <div className="mb-0.5 font-semibold text-foreground/60">β perf</div>
+              {p.fps != null && <div className="flex justify-between"><span>FPS</span><span>{p.fps}</span></div>}
+              {p.remPerf && (<>
+                <div className="flex justify-between"><span>WSE grid ({p.remPerf.wseMode})</span><span>{p.remPerf.wseGridMs != null ? `${p.remPerf.wseGridMs.toFixed(1)} ms` : "—"}</span></div>
+                {p.remPerf.lastTile && (<>
+                  <div className="flex justify-between"><span>tile total</span><span>{p.remPerf.lastTile.totalMs.toFixed(1)} ms</span></div>
+                  <div className="flex justify-between pl-3"><span>DEM fetch</span><span>{p.remPerf.lastTile.demFetchMs.toFixed(1)} ms</span></div>
+                  <div className="flex justify-between pl-3"><span>pixel loop</span><span>{p.remPerf.lastTile.pixelLoopMs.toFixed(1)} ms</span></div>
+                  <div className="flex justify-between pl-3"><span>PNG encode</span><span>{p.remPerf.lastTile.pngEncodeMs.toFixed(1)} ms</span></div>
+                </>)}
+                {p.remPerf.avgTileMs != null && <div className="flex justify-between"><span>avg tile</span><span>{p.remPerf.avgTileMs.toFixed(1)} ms</span></div>}
+                <div className="flex justify-between"><span>cache</span><span>{p.remPerf.cacheSize} tiles ({p.remPerf.cacheHits} hits)</span></div>
+                <div className="flex justify-between"><span>rendered</span><span>{p.remPerf.tileCount} tiles</span></div>
+              </>)}
+            </div>
           )}
 
         </>)}

@@ -20,7 +20,7 @@ automated by **RiverREM** (Klar & Coe et al., OpenTopography —
 
 1. **Centerline** — query OSM for named `waterway` ways in the view, keep the **longest** (or draw / import one).
 2. **Sample WSE** — read DEM elevation along the centerline (the river's water-surface elevation).
-3. **Interpolate** — spread WSE across the DEM with **inverse-distance weighting** (in EPSG:3857).
+3. **Interpolate** — spread WSE across the DEM with **inverse-distance weighting** (in EPSG:3857); the client engine also supports nearest-polyline and EDT modes (see below).
 4. **Detrend** — `REM = DEM - WSE`, i.e. metres above the river; colour it with a log-scaled / tight ramp.
 
 The REM is served as a single float band, so **all** colour logic (ramp, min/max, log,
@@ -55,6 +55,66 @@ A standalone single-file version lives at **`/rem-pure-frontend.html`** (no buil
 > Note on fidelity: the server engine reproduces the **RiverREM package** (k-NN, power 1);
 > the client engine reproduces the **QGIS / Dan Coe** flavour (all-points, power ~2). Both
 > are valid — pick the engine for the contract you want.
+
+### WSE interpolation modes (beta)
+
+The client engine supports three algorithms for spreading the sampled water-surface
+elevations (WSE) across the grid, selectable via `?beta=true&interp=<mode>` in the URL:
+
+#### IDW — Inverse-Distance Weighting (default)
+
+Classic Dan Coe / RiverREM method. For every grid cell, WSE is a power-weighted mean of
+all sampled river points. Power ≥ 1 (configurable). Well-known, smooth, but produces
+**radial bull's-eye halos** around sample points, especially where sample density is low.
+A post-hoc box-blur was previously applied to soften these; it has been removed in favour
+of the modes below.
+
+#### Nearest — Nearest-point-on-polyline (JFA concept)
+
+For each grid cell, project onto the nearest river segment and **linearly interpolate WSE
+between the two endpoint elevations** at the projection parameter `t`. This is the
+physically-correct hydrological model: WSE at any floodplain point equals the elevation of
+the nearest point on the river centreline, so cross-channel bands are perfectly clean and
+there are no bull's-eyes by construction.
+
+Algorithmically this is the **labeled Voronoi / nearest-feature allocation** of the
+continuous polyline geometry — each cell belongs to the nearest segment, WSE comes from a
+lerp along that segment. It is also called **nearest-seed propagation** or **JFA** (Jump
+Flooding Algorithm) in the GPU context, where the same nearest-seed result is produced
+with O(log N) parallel passes instead of O(N) sequential sweeps. The CPU implementation
+here is brute-force O(cells × segments) but sub-second at the 256² global grid.
+
+One known limitation shared with IDW: **nearest Euclidean** distance is used. In a tight
+meander neck the spatially-closest river cell may belong to the wrong reach (opposite bank
+of the neck). This is visible only in extreme meanders and is accepted as a known artefact
+(RiverREM's IDW has the same flaw).
+
+#### EDT — Rasterized labeled Euclidean Distance Transform
+
+An alternative to the continuous nearest-polyline approach. Rather than projecting onto
+continuous geometry, it:
+
+1. **Burns** the centreline into the grid with Bresenham-style rasterisation, writing a
+   linearly-interpolated WSE value at each covered cell.
+2. **Phase 1** — column-wise 1D nearest-seed pass: for each grid column, a two-pass
+   forward/backward scan identifies the nearest burned row for every query row. O(w × h).
+3. **Phase 2** — row-wise 1D Voronoi via the **Felzenszwalb-Huttenlocher parabola lower
+   envelope**: for each grid row, processes the phase-1 nearest-seed distances as a set of
+   parabolas, builds the lower envelope in one left-to-right sweep with a monotone stack,
+   then reads the nearest source WSE for each query column in a single scan. O(w × h).
+
+Total cost is **O(cells)** after the burn step — vs O(cells × segments) for the
+nearest-polyline mode — making EDT faster when the grid resolution is raised (512², 1024²).
+The result is theoretically identical to nearest-polyline except for **rasterisation
+aliasing**: the burned grid approximates the polyline at cell resolution (~60–400 m at
+256² over a typical river extent), so WSE band edges are slightly blocky. At 512²+ the
+aliasing is imperceptible.
+
+**References**
+- Coe, D. (2022). [Creating REMs in QGIS — the IDW method](https://dancoecarto.com/creating-rems-in-qgis-the-idw-method)
+- Klar, J. K. & Coe, D. et al. (2023). [RiverREM — OpenTopography](https://opentopography.org/blog/new-package-automates-river-relative-elevation-model-rem-generation)
+- Felzenszwalb, P. F. & Huttenlocher, D. P. (2012). [Distance Transforms of Sampled Functions](https://cs.brown.edu/people/pfelzens/dt/). *Theory of Computing*, 8(1):415–428.
+- Meijster, A., Roerdink, J. B. T. M. & Hesselink, W. H. (2000). A general algorithm for computing distance transforms in linear time. *Computational Imaging and Vision*, 18:331–340.
 
 ---
 

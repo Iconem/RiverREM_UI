@@ -42,7 +42,9 @@ export function useRemOptions() {
   return useQueryStates({
     mode: parseAsStringEnum(["osm", "geojson", "shapefile"]).withDefault("osm"),
     engine: parseAsStringEnum(["server", "client"]).withDefault("client"), // server=RiverREM COG, client=pure-JS live tiles
-    power: parseAsFloat.withDefault(2), // IDW power (both engines)
+    power: parseAsFloat.withDefault(2), // IDW power (both engines; unused in client JFA mode)
+    interp: parseAsStringEnum(["idw", "jfa", "edt"]).withDefault("idw"), // client WSE interpolation mode
+    beta: parseAsBoolean.withDefault(false), // enables experimental controls (WSE toggle, perf panel)
     samples: parseAsInteger.withDefault(150), // river WSE sample count (client engine)
     base: parseAsStringEnum([...BASEMAPS]).withDefault("dark"),
     ramp: parseAsStringEnum([...RAMP_NAMES]).withDefault("mako_r"),
