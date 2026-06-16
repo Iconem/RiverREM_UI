@@ -221,6 +221,10 @@ export function MapView({
     if (map.getLayer("contours-label")) map.moveLayer("contours-label");
     if (map.getLayer("hillshade-overlay")) map.moveLayer("hillshade-overlay");
     if (map.getLayer("preview-line")) map.moveLayer("preview-line");
+    if (map.getLayer("river-overlay")) map.moveLayer("river-overlay");
+    if (map.getLayer("samples-layer")) map.moveLayer("samples-layer");
+    if (map.getLayer("viewport-fill")) map.moveLayer("viewport-fill");
+    if (map.getLayer("viewport-line")) map.moveLayer("viewport-line");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, cogUrl, remToken, clientMaxZoom, isDemMode, ready]);
 
@@ -252,9 +256,12 @@ export function MapView({
     map.setPaintProperty(id, "hillshade-accent-color", "rgba(0,0,0,0)");
     map.setPaintProperty(id, "hillshade-exaggeration", 0.5);
     map.setLayoutProperty(id, "visibility", "visible");
-    map.moveLayer(id); // keep it topmost, above the freshly (re)added color-relief
-    // Keep preview above hillshade; river stays below REM intentionally
+    map.moveLayer(id);
     if (map.getLayer("preview-line")) map.moveLayer("preview-line");
+    if (map.getLayer("river-overlay")) map.moveLayer("river-overlay");
+    if (map.getLayer("samples-layer")) map.moveLayer("samples-layer");
+    if (map.getLayer("viewport-fill")) map.moveLayer("viewport-fill");
+    if (map.getLayer("viewport-line")) map.moveLayer("viewport-line");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.hillshade, ready, cogUrl, remToken, engine]);
 
@@ -272,7 +279,7 @@ export function MapView({
       id: "river-overlay", type: "line", source: "river-overlay-src",
       layout: { "line-join": "round", "line-cap": "round", visibility: showRiver ? "visible" : "none" },
       paint: { "line-color": "#ffffff", "line-width": 2, "line-dasharray": [4, 4], "line-opacity": 0.75 },
-    } as any, remLayerId ?? undefined);
+    } as any); // no beforeId → top of stack
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [riverGeojson, showRiver, ready]);
 
@@ -383,9 +390,12 @@ export function MapView({
           "text-halo-width": 1.5,
         },
       } as any);
-      // Bring contours above REM layer (REM may have been added before this effect).
       if (map.getLayer("hillshade-overlay")) map.moveLayer("hillshade-overlay");
       if (map.getLayer("preview-line")) map.moveLayer("preview-line");
+      if (map.getLayer("river-overlay")) map.moveLayer("river-overlay");
+      if (map.getLayer("samples-layer")) map.moveLayer("samples-layer");
+      if (map.getLayer("viewport-fill")) map.moveLayer("viewport-fill");
+      if (map.getLayer("viewport-line")) map.moveLayer("viewport-line");
     } catch (e) {
       console.warn("[contours] setup failed:", e);
     }

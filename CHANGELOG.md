@@ -7,6 +7,36 @@ sessions, so dates are approximate; the ordering is chronological.
 `0.1.0` is the initial RiverREM Python-backend app. `1.0.0` introduces the pure-frontend
 (client-side JS) REM engine. Anything before `1.0.0` is server-only.
 
+## [1.6.0] — 2026-06-16
+
+### Added
+- **Live mode** — client engine auto-fetches the river on every map move/zoom without
+  pressing Compute. Toggleable per-session (`?live=true`). Works for all three WSE
+  interpolation modes (IDW, JFA, EDT); a warning icon appears next to the toggle when IDW
+  is selected (IDW recomputes all samples per tile — prefer JFA or EDT for smooth panning).
+- **OSM Vector Tiles river source** — Shortbread v1 MVT tiles (e.g. OpenStreetMap vector
+  tiles) and PMTiles archives are now supported alongside Overpass and QLever. The Select
+  lists them in a labelled "OSM Vector tiles (beta)" subsection. Correctly handles the
+  Shortbread two-layer design (`water_lines` for geometry, `water_lines_labels` for names).
+- **GeoTIFF COG export from browser tiles** — Export REM or DEM tiles assembled in the
+  browser to a tiled Float32 GeoTIFF (Cloud-Optimised compatible). Tile mosaic logic shared
+  between REM and DEM paths via a shared `_exportCogImpl` helper.
+- **Layer ordering** — viewport fill/outline, river overlay, and sample points are always
+  moved to the top of the MapLibre layer stack when added or updated, so they render above
+  every basemap and raster layer.
+- **Visibility state preserved** — show/hide state for contours, contour labels, REM output,
+  river, and river samples chips is tracked in URL state and restored across reloads.
+- **Export section visible in live mode** — the Export panel now appears as soon as live
+  mode is active, not only after a server compute or run load.
+
+### Changed
+- IDW power and River samples row hidden entirely for JFA and EDT (those parameters are not
+  used by the nearest-polyline and EDT paths).
+- "beta perf" panel (live-mode performance stats) is now shown only when live mode is on,
+  and the label uses plain text "beta" instead of the Greek β character.
+- QLever endpoint grouped under its own "QLever" subsection label in the Endpoint select.
+- "OSM Vector tiles (beta)" section label rendered in foreground (white) instead of amber.
+
 ## [1.5.0] — 2026-06-16
 
 ### Added

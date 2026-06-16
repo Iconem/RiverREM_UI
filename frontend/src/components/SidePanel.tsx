@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Upload, Pencil, Waves, Play, Loader2, Download, Share2, Layers, Trash2, FileDown,
   Eye, EyeOff, Check, X, Search, MapPin, Copy, ChevronUp, ChevronDown, ChevronRight, ChevronLeft, Crosshair, ExternalLink,
-  List, LayoutGrid, ImageOff, Camera, Save, Sun, Moon, Maximize2, RefreshCw,
+  List, LayoutGrid, ImageOff, Camera, Save, Sun, Moon, Maximize2, RefreshCw, TriangleAlert,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ type Opts = {
   showRiver: boolean;
   showSamples: boolean;
   showViewport: boolean;
+  live: boolean;
 };
 
 function Swatch({ ramp, reverse = false, className = "h-3 w-8" }: { ramp: string; reverse?: boolean; className?: string }) {
@@ -82,6 +83,8 @@ export function SidePanel(p: {
   demCogUrl: string; setDemCogUrl: (v: string) => void;
   onShare: () => void; onExportComposite: () => void; onCopyImage: () => void;
   onExportRaw: () => void; onExportDem: () => void; onExportCenterline: () => void;
+  onExportClientCog?: (zoom: number) => Promise<void>;
+  onExportClientDemCog?: (zoom: number) => Promise<void>;
   onLoadRun: (r: Run) => void; onDeleteRun: (id: string) => void; onRenameRun: (id: string, name: string) => void;
   onRecaptureThumb: (id: string) => void;
   onSaveSymbology: () => void; onOpenGallery: () => void;
@@ -92,6 +95,8 @@ export function SidePanel(p: {
   onSyncServer: () => void;
   fps?: number | null;
   remPerf?: import("@/lib/remClient").RemPerfStats | null;
+  previewBusy?: boolean;
+  serverRunsLoading?: boolean;
 }) {
   const { opts, setOpts, busy, result } = p;
   const [ui, setUi] = useUiState();
@@ -112,6 +117,9 @@ export function SidePanel(p: {
   // Samples input: same blur/Enter pattern to avoid clamping partial keystrokes.
   const [samplesStr, setSamplesStr] = useState(String(opts.samples));
   const [imgCopyMsg, setImgCopyMsg] = useState<"" | "Copying…" | "Copied!">("");
+  const [cogZoom, setCogZoom] = useState(13);
+  const [cogExporting, setCogExporting] = useState(false);
+  const [demExporting, setDemExporting] = useState(false);
   useEffect(() => { setSamplesStr(String(opts.samples)); }, [opts.samples]);
 
   // Remember last non-off basemap + hillshade for chip toggle.
@@ -224,19 +232,25 @@ export function SidePanel(p: {
                   <Select value={opts.osm} onValueChange={(v) => setOpts({ osm: v })}>
                     <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <div className="px-2 pb-1 pt-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">QLever</div>
                       {OVERPASS_PRESETS.filter((o) => o.url.includes("qlever")).map((o) => (
                         <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>
                       ))}
                       <div className="my-1 border-t border-border" />
                       <div className="px-2 pb-1 pt-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">Overpass</div>
-                      {OVERPASS_PRESETS.filter((o) => !o.url.includes("qlever")).map((o) => (
+                      {OVERPASS_PRESETS.filter((o) => !o.url.includes("qlever") && !o.beta).map((o) => (
+                        <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>
+                      ))}
+                      <div className="my-1 border-t border-border" />
+                      <div className="px-2 pb-1 pt-0.5 font-mono text-[9px] uppercase tracking-wide text-foreground">OSM Vector tiles (beta)</div>
+                      {OVERPASS_PRESETS.filter((o) => o.beta).map((o) => (
                         <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
-              {opts.osm.includes("qlever") && (
+              {(opts.osm.includes("qlever") || OVERPASS_PRESETS.find((pr) => pr.url === opts.osm)?.beta) && (
                 <div className="flex items-center justify-between gap-2">
                   <Label>River mode</Label>
                   <div className="w-44">
@@ -251,7 +265,8 @@ export function SidePanel(p: {
                   </div>
                 </div>
               )}
-              <Button variant="outline" size="sm" className="w-full" onClick={p.onPreview} disabled={busy}>
+              <Button variant="outline" size="sm" className="w-full gap-1" onClick={p.onPreview} disabled={busy || p.previewBusy}>
+                {p.previewBusy && <Loader2 className="h-3 w-3 animate-spin" />}
                 {opts.osm.includes("qlever") && opts.qleverMode === "all" ? "Preview named rivers" : opts.osm.includes("qlever") && opts.qleverMode === "waterways" ? "Preview all waterways" : "Preview longest river"}
               </Button>
             </>
@@ -297,43 +312,58 @@ export function SidePanel(p: {
               <Label>WSE interpolation</Label>
               <Tabs value={opts.interp} onValueChange={(v) => setOpts({ interp: v as Opts["interp"] })}>
                 <TabsList className="w-auto">
-                  <TabsTrigger value="idw" className="px-3" title="Inverse-distance weighting — classic, configurable, may produce radial bull's-eyes near sample points">IDW</TabsTrigger>
-                  <TabsTrigger value="jfa" className="px-3" title="Nearest-point-on-polyline — projects each cell onto the closest river segment and lerps WSE; exact, no bull's-eyes">Nearest</TabsTrigger>
-                  <TabsTrigger value="edt" className="px-3" title="Rasterize centerline → Felzenszwalb-Huttenlocher labeled EDT — O(cells) exact Voronoi; slight raster aliasing vs Nearest but faster at high grid resolutions">EDT</TabsTrigger>
+                  <TabsTrigger value="idw" className="px-3" title="Inverse Distance Weighting — original REM algorithm by Dan Coe. Power-weighted mean over all river samples. CPU only.">IDW</TabsTrigger>
+                  <TabsTrigger value="jfa" className="px-3" title="Nearest-on-polyline: each cell projects onto the closest river segment, WSE lerped at t. CPU only. (GPU variant = Jump Flood Algorithm.)">JFA</TabsTrigger>
+                  <TabsTrigger value="edt" className="px-3" title="Rasterize centerline → Felzenszwalb-Huttenlocher 2-pass distance transform. O(cells), slight raster aliasing vs JFA. CPU only.">EDT</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
           )}
 
-          <div className="grid grid-cols-[1fr_3fr] items-end gap-2">
-            {(opts.engine === "server" || opts.interp === "idw") ? ( // IDW power not used in nearest/EDT modes
+          {opts.engine === "client" && opts.beta && (
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1">
+                  <Label>Live mode</Label>
+                  {opts.interp === "idw" && (
+                    <TriangleAlert className="h-3 w-3 text-amber-400" title="IDW recomputes every sample on every tile — slow in live mode. Switch to JFA or EDT for smooth panning." />
+                  )}
+                </div>
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  {opts.interp === "idw" ? "IDW slow — prefer JFA or EDT" : "Auto-fetch river on map move"}
+                </p>
+              </div>
+              <Switch checked={opts.live} onCheckedChange={(v) => setOpts({ live: v })} />
+            </div>
+          )}
+
+          {(opts.engine === "server" || opts.interp === "idw") && (
+            <div className="grid grid-cols-[1fr_3fr] items-end gap-2">
               <div className="space-y-1">
                 <div className="flex h-4 items-center"><Label>IDW power</Label></div>
                 <Input type="number" step="0.5" min="0.5" max="4" value={opts.power} className="text-xs"
                   title="Inverse-distance weighting exponent. OpenTopography/RiverREM uses 1; Dan Coe's original QGIS method uses 2. Higher = more local (closer samples dominate)."
                   onChange={(e) => setOpts({ power: Math.max(0.5, Math.min(4, parseFloat(e.target.value) || 2)) })} />
               </div>
-            ) : (
-              <div />
-            )}
-            {opts.engine === "client" ? (
-              <div className="space-y-1">
-                <div className="flex h-4 items-center"><Label>River samples</Label></div>
-                <Input type="number" step="10" min="10" max="1000" value={samplesStr} className="text-xs"
-                  title="Spacing between river elevation samples. Roughly should match the river width — narrower river = fewer samples needed."
-                  onChange={(e) => setSamplesStr(e.target.value)}
-                  onBlur={() => { const v = parseInt(samplesStr); if (Number.isFinite(v)) setOpts({ samples: Math.max(10, Math.min(1000, v)) }); else setSamplesStr(String(opts.samples)); }}
-                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <div className="flex h-4 items-center"><Label>Resolution</Label></div>
-                <Tabs value={String(opts.res)} onValueChange={(v) => setOpts({ res: Number(v) })}>
-                  <TabsList className="grid w-full grid-cols-3">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)}>{r}×</TabsTrigger>)}</TabsList>
-                </Tabs>
-              </div>
-            )}
-          </div>
+              {opts.engine === "client" ? (
+                <div className="space-y-1">
+                  <div className="flex h-4 items-center"><Label>River samples</Label></div>
+                  <Input type="number" step="10" min="10" max="1000" value={samplesStr} className="text-xs"
+                    title="Spacing between river elevation samples. Roughly should match the river width — narrower river = fewer samples needed."
+                    onChange={(e) => setSamplesStr(e.target.value)}
+                    onBlur={() => { const v = parseInt(samplesStr); if (Number.isFinite(v)) setOpts({ samples: Math.max(10, Math.min(1000, v)) }); else setSamplesStr(String(opts.samples)); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="flex h-4 items-center"><Label>Resolution</Label></div>
+                  <Tabs value={String(opts.res)} onValueChange={(v) => setOpts({ res: Number(v) })}>
+                    <TabsList className="grid w-full grid-cols-3">{[1, 2, 4].map((r) => <TabsTrigger key={r} value={String(r)}>{r}×</TabsTrigger>)}</TabsList>
+                  </Tabs>
+                </div>
+              )}
+            </div>
+          )}
 
           {opts.engine === "client" ? (
             <p className="font-mono text-[10px] leading-snug text-muted-foreground">
@@ -353,25 +383,6 @@ export function SidePanel(p: {
           <Progress active={busy} label={p.phase} pct={p.pct} />
           {!busy && p.resNote && (
             <p className="font-mono text-[10px] leading-relaxed text-amber-500/90">{p.resNote}</p>
-          )}
-
-          {opts.beta && (p.remPerf || p.fps != null) && (
-            <div className="rounded border border-border/40 bg-muted/30 px-2 py-1.5 font-mono text-[10px] leading-snug text-muted-foreground">
-              <div className="mb-0.5 font-semibold text-foreground/60">β perf</div>
-              {p.fps != null && <div className="flex justify-between"><span>FPS</span><span>{p.fps}</span></div>}
-              {p.remPerf && (<>
-                <div className="flex justify-between"><span>WSE grid ({p.remPerf.wseMode})</span><span>{p.remPerf.wseGridMs != null ? `${p.remPerf.wseGridMs.toFixed(1)} ms` : "—"}</span></div>
-                {p.remPerf.lastTile && (<>
-                  <div className="flex justify-between"><span>tile total</span><span>{p.remPerf.lastTile.totalMs.toFixed(1)} ms</span></div>
-                  <div className="flex justify-between pl-3"><span>DEM fetch</span><span>{p.remPerf.lastTile.demFetchMs.toFixed(1)} ms</span></div>
-                  <div className="flex justify-between pl-3"><span>pixel loop</span><span>{p.remPerf.lastTile.pixelLoopMs.toFixed(1)} ms</span></div>
-                  <div className="flex justify-between pl-3"><span>PNG encode</span><span>{p.remPerf.lastTile.pngEncodeMs.toFixed(1)} ms</span></div>
-                </>)}
-                {p.remPerf.avgTileMs != null && <div className="flex justify-between"><span>avg tile</span><span>{p.remPerf.avgTileMs.toFixed(1)} ms</span></div>}
-                <div className="flex justify-between"><span>cache</span><span>{p.remPerf.cacheSize} tiles ({p.remPerf.cacheHits} hits)</span></div>
-                <div className="flex justify-between"><span>rendered</span><span>{p.remPerf.tileCount} tiles</span></div>
-              </>)}
-            </div>
           )}
 
         </>)}
@@ -406,6 +417,24 @@ export function SidePanel(p: {
                   DEM {p.pick.dem ?? "–"} m · REM {p.pick.rem ?? "–"} m · {p.pick.lat.toFixed(5)}, {p.pick.lng.toFixed(5)}
                 </p>
               )}
+            </div>
+          )}
+          {opts.live && (p.remPerf || p.fps != null) && (
+            <div className="rounded border border-border/40 bg-muted/30 px-2 py-1.5 font-mono text-[10px] leading-snug text-muted-foreground">
+              <div className="mb-0.5 font-semibold text-foreground/60">beta perf</div>
+              {p.fps != null && <div className="flex justify-between"><span>FPS</span><span>{p.fps}</span></div>}
+              {p.remPerf && (<>
+                <div className="flex justify-between"><span>WSE grid ({p.remPerf.wseMode})</span><span>{p.remPerf.wseGridMs != null ? `${p.remPerf.wseGridMs.toFixed(1)} ms` : "—"}</span></div>
+                {p.remPerf.lastTile && (<>
+                  <div className="flex justify-between"><span>tile total</span><span>{p.remPerf.lastTile.totalMs.toFixed(1)} ms</span></div>
+                  <div className="flex justify-between pl-3"><span>terrarium decode</span><span>{p.remPerf.lastTile.terrariumDecodeMs.toFixed(1)} ms</span></div>
+                  <div className="flex justify-between pl-3"><span>pixel loop</span><span>{p.remPerf.lastTile.pixelLoopMs.toFixed(1)} ms</span></div>
+                  <div className="flex justify-between pl-3"><span>PNG encode</span><span>{p.remPerf.lastTile.pngEncodeMs.toFixed(1)} ms</span></div>
+                </>)}
+                {p.remPerf.avgTileMs != null && <div className="flex justify-between"><span>avg tile</span><span>{p.remPerf.avgTileMs.toFixed(1)} ms</span></div>}
+                <div className="flex justify-between"><span>cache</span><span>{p.remPerf.cacheSize} tiles ({p.remPerf.cacheHits} hits)</span></div>
+                <div className="flex justify-between"><span>rendered</span><span>{p.remPerf.tileCount} tiles</span></div>
+              </>)}
             </div>
           )}
         </>)}
@@ -602,11 +631,13 @@ export function SidePanel(p: {
                 <span className="h-2 w-2 rounded-full" style={{ background: result && p.remVisible ? "#60a5fa" : "#666" }} />
                 {isDem ? "DEM Output" : "REM Output"}
               </button>
-              {/* River — always enabled when centerline exists; River Samples needs result + client */}
+              {/* River — always enabled when centerline exists; River Samples only for IDW client mode */}
               {([
                 { key: "showRiver", label: "River", color: "#94a3b8", needsResult: false },
                 { key: "showSamples", label: "River Samples", color: "#fbbf24", needsResult: true },
-              ] as { key: keyof Opts & string; label: string; color: string; needsResult: boolean }[]).map(({ key, label, color, needsResult }) => {
+              ] as { key: keyof Opts & string; label: string; color: string; needsResult: boolean }[])
+              .filter(({ key }) => key !== "showSamples" || (opts.engine === "client" && opts.interp === "idw"))
+              .map(({ key, label, color, needsResult }) => {
                 const on = opts[key] as boolean;
                 const disabled = needsResult && !result;
                 return (
@@ -656,7 +687,7 @@ export function SidePanel(p: {
         </>)}
       </div>
 
-      {result && (
+      {(result || opts.live) && (
         <>
           <Separator />
           {/* Export (foldable) */}
@@ -679,12 +710,51 @@ export function SidePanel(p: {
             {!ui.foldExport && (<>
               <div className="grid grid-cols-2 gap-2">
                 <Button variant="outline" size="sm" onClick={p.onExportComposite}><Download className="mr-1 h-3 w-3" />Composite JPG</Button>
-                <Button variant="outline" size="sm" onClick={p.onExportRaw} disabled={opts.engine === "client"}
-                  title={opts.engine === "client" ? "COGs can only be exported for server runs" : undefined}><FileDown className="mr-1 h-3 w-3" />REM COG</Button>
+                <Button variant="outline" size="sm"
+                  onClick={opts.engine === "client"
+                    ? async () => { if (!p.onExportClientCog) return; setCogExporting(true); try { await p.onExportClientCog(cogZoom); } finally { setCogExporting(false); } }
+                    : p.onExportRaw}
+                  disabled={opts.engine === "client" ? (cogExporting || !p.onExportClientCog) : false}
+                  className={opts.engine === "client" ? "border-amber-400/20 text-amber-400/40 hover:text-amber-400/60" : ""}>
+                  {cogExporting ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : opts.engine === "client" ? <TriangleAlert className="mr-1 h-3 w-3 shrink-0" /> : <FileDown className="mr-1 h-3 w-3" />}
+                  {cogExporting ? "Exporting…" : "REM COG"}
+                </Button>
                 <Button variant="outline" size="sm" onClick={p.onExportCenterline} disabled={!p.hasCenterline}><FileDown className="mr-1 h-3 w-3" />Centerline</Button>
-                <Button variant="outline" size="sm" onClick={p.onExportDem} disabled={opts.engine === "client" || !result.dem_url}
-                  title={opts.engine === "client" ? "COGs can only be exported for server runs" : undefined}><FileDown className="mr-1 h-3 w-3" />DEM COG</Button>
+                <Button variant="outline" size="sm"
+                  onClick={opts.engine === "client"
+                    ? async () => { if (!p.onExportClientDemCog) return; setDemExporting(true); try { await p.onExportClientDemCog(cogZoom); } finally { setDemExporting(false); } }
+                    : p.onExportDem}
+                  disabled={opts.engine === "client" ? (demExporting || !p.onExportClientDemCog) : !result.dem_url}
+                  className={opts.engine === "client" ? "border-amber-400/20 text-amber-400/40 hover:text-amber-400/60" : ""}>
+                  {demExporting ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : opts.engine === "client" ? <TriangleAlert className="mr-1 h-3 w-3 shrink-0" /> : <FileDown className="mr-1 h-3 w-3" />}
+                  {demExporting ? "Exporting…" : "DEM COG"}
+                </Button>
               </div>
+              {opts.engine === "client" && (() => {
+                const b = result.bounds;
+                const lon2t = (lon: number, z: number) => Math.floor(((lon + 180) / 360) * 2 ** z);
+                const lat2t = (lat: number, z: number) => Math.floor(((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * 2 ** z);
+                const nx = lon2t(b[2], cogZoom) - lon2t(b[0], cogZoom) + 1;
+                const ny = lat2t(b[1], cogZoom) - lat2t(b[3], cogZoom) + 1;
+                const gsd = 40075016 * Math.cos(((b[1] + b[3]) / 2) * Math.PI / 180) / (256 * 2 ** cogZoom);
+                return (
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px]">Zoom</Label>
+                      <Input type="number" min={8} max={18} step={1} value={cogZoom} className="h-7 text-xs"
+                        onChange={(e) => setCogZoom(Math.max(8, Math.min(18, parseInt(e.target.value) || 13)))} />
+                    </div>
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px]">GSD (m/px)</Label>
+                      <div className="flex h-7 items-center rounded-md border border-border/50 bg-muted/30 px-2 font-mono text-[10px] text-muted-foreground">{gsd.toFixed(1)}</div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px]">Size (px)</Label>
+                      <div className="flex h-7 items-center rounded-md border border-border/50 bg-muted/30 px-2 font-mono text-[10px] text-muted-foreground">{nx * 256}×{ny * 256}</div>
+                    </div>
+                  </div>
+                );
+              })()}
               <Button variant="ghost" size="sm" className="h-7 w-full gap-1 text-xs"
                 disabled={opts.engine === "client"}
                 title={opts.engine === "client" ? "cog-viewer is only available for server runs" : undefined}
@@ -739,7 +809,12 @@ export function SidePanel(p: {
                   </button>
                 </div>
               </div>
-              {!ui.foldRuns && isServer && list.length === 0 && (
+              {!ui.foldRuns && isServer && p.serverRunsLoading && (
+                <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />Loading server runs…
+                </div>
+              )}
+              {!ui.foldRuns && isServer && !p.serverRunsLoading && list.length === 0 && (
                 <p className="font-mono text-[10px] text-muted-foreground">No server runs yet (server computes are saved here, shared across devices).</p>
               )}
               {!ui.foldRuns && (

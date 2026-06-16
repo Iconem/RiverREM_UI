@@ -93,23 +93,39 @@ function encodePng(rgba: Uint8ClampedArray, w: number, h: number): ArrayBuffer {
   return out.buffer;
 }
 
-// ── Minimal single-band float32 GeoTIFF encoder (EPSG:4326, uncompressed) ─────
-// Lets QGIS read the EXACT computed metres (DEM / WSE / REM) with no 8-bit
-// quantisation — the diagnostic outputs are the real float values, georeferenced.
+// ── Tiled single-band float32 GeoTIFF encoder (EPSG:4326, uncompressed) ─────
+// Writes 256×256 tiles — required by cog-viewer and GDAL/geotiff.js ("Tiff is not
+// tiled" is thrown when TileWidth/TileLength tags are absent). Each tile is a full
+// 256×256 float32 block; edge tiles are zero-padded to the tile size.
 function encodeGeoTiffF32(
   data: Float32Array, w: number, h: number,
   lonW: number, latN: number, lonE: number, latS: number,
 ): ArrayBuffer {
-  const nEntries = 13;
+  const tileW = 256, tileH = 256;
+  const tilesX = Math.ceil(w / tileW);
+  const tilesY = Math.ceil(h / tileH);
+  const numTiles = tilesX * tilesY;
+  const tileBytes = tileW * tileH * 4; // float32 per sample
+
+  // 15 IFD entries, ascending tag order:
+  // 256,257,258,259,262,277,284,322,323,324,325,339,33550,33922,34735
+  const nEntries = 15;
   const ifdOffset = 8;
   const ifdSize = 2 + nEntries * 12 + 4;
-  const scaleOff = ifdOffset + ifdSize;   // ModelPixelScale: 3 doubles
-  const tiepointOff = scaleOff + 24;      // ModelTiepoint: 6 doubles
-  const geoKeyOff = tiepointOff + 48;     // GeoKeyDirectory: 16 shorts
-  const stripOff = geoKeyOff + 32;
-  const stripBytes = w * h * 4;
-  const buf = new ArrayBuffer(stripOff + stripBytes);
+
+  // Tile offset/bytecount arrays are only needed when numTiles > 1.
+  // When numTiles === 1 the values are inlined directly in the IFD entry.
+  const arrSize = numTiles > 1 ? numTiles * 4 : 0;
+  const tileOffsetsArrOff = ifdOffset + ifdSize;
+  const tileByteCntsArrOff = tileOffsetsArrOff + arrSize;
+  const scaleOff = tileByteCntsArrOff + arrSize;
+  const tiepointOff = scaleOff + 24;
+  const geoKeyOff = tiepointOff + 48;
+  const tileDataStart = geoKeyOff + 32;
+
+  const buf = new ArrayBuffer(tileDataStart + numTiles * tileBytes);
   const dv = new DataView(buf);
+
   // TIFF header (little-endian)
   dv.setUint16(0, 0x4949, true); dv.setUint16(2, 42, true); dv.setUint32(4, ifdOffset, true);
   dv.setUint16(ifdOffset, nEntries, true);
@@ -118,32 +134,57 @@ function encodeGeoTiffF32(
     dv.setUint16(e, tag, true); dv.setUint16(e + 2, type, true);
     dv.setUint32(e + 4, count, true); dv.setUint32(e + 8, value, true); e += 12;
   };
-  // tags in ascending order (TIFF requirement). type: 3=SHORT 4=LONG 12=DOUBLE
-  entry(256, 4, 1, w);            // ImageWidth
-  entry(257, 4, 1, h);            // ImageLength
-  entry(258, 3, 1, 32);           // BitsPerSample
-  entry(259, 3, 1, 1);            // Compression = none
-  entry(262, 3, 1, 1);            // Photometric = BlackIsZero
-  entry(273, 4, 1, stripOff);     // StripOffsets
-  entry(277, 3, 1, 1);            // SamplesPerPixel
-  entry(278, 4, 1, h);            // RowsPerStrip
-  entry(279, 4, 1, stripBytes);   // StripByteCounts
-  entry(339, 3, 1, 3);            // SampleFormat = IEEE float
-  entry(33550, 12, 3, scaleOff);     // ModelPixelScaleTag
-  entry(33922, 12, 6, tiepointOff);  // ModelTiepointTag
-  entry(34735, 3, 16, geoKeyOff);    // GeoKeyDirectoryTag
-  dv.setUint32(e, 0, true); // next IFD
-  // pixel scale (degrees/px), Y positive (sign carried by the row order, top-down)
-  dv.setFloat64(scaleOff, (lonE - lonW) / w, true);
-  dv.setFloat64(scaleOff + 8, (latN - latS) / h, true);
+  entry(256, 4, 1, w);           // ImageWidth
+  entry(257, 4, 1, h);           // ImageLength
+  entry(258, 3, 1, 32);          // BitsPerSample
+  entry(259, 3, 1, 1);           // Compression = none
+  entry(262, 3, 1, 1);           // Photometric = BlackIsZero
+  entry(277, 3, 1, 1);           // SamplesPerPixel
+  entry(284, 3, 1, 1);           // PlanarConfiguration = contiguous
+  entry(322, 4, 1, tileW);       // TileWidth
+  entry(323, 4, 1, tileH);       // TileLength
+  // count=1: value is inlined; count>1: value is offset to LONG array
+  entry(324, 4, numTiles, numTiles === 1 ? tileDataStart : tileOffsetsArrOff);
+  entry(325, 4, numTiles, numTiles === 1 ? tileBytes    : tileByteCntsArrOff);
+  entry(339, 3, 1, 3);           // SampleFormat = IEEE float
+  entry(33550, 12, 3, scaleOff);
+  entry(33922, 12, 6, tiepointOff);
+  entry(34735, 3, 16, geoKeyOff);
+  dv.setUint32(e, 0, true);
+
+  // Write per-tile offset / bytecount arrays (only when > 1 tile)
+  if (numTiles > 1) {
+    for (let i = 0; i < numTiles; i++) {
+      dv.setUint32(tileOffsetsArrOff + i * 4, tileDataStart + i * tileBytes, true);
+      dv.setUint32(tileByteCntsArrOff + i * 4, tileBytes, true);
+    }
+  }
+
+  // ModelPixelScale: degrees/pixel, Y sign carried by top-down row order
+  dv.setFloat64(scaleOff,      (lonE - lonW) / w, true);
+  dv.setFloat64(scaleOff + 8,  (latN - latS) / h, true);
   dv.setFloat64(scaleOff + 16, 0, true);
-  // raster (0,0,0) → model (lonW, latN, 0)
+  // ModelTiepoint: raster (0,0,0) → model (lonW, latN, 0)
   dv.setFloat64(tiepointOff + 24, lonW, true);
   dv.setFloat64(tiepointOff + 32, latN, true);
-  // GeoKeyDirectory: geographic (4326), pixel-is-area
+  // GeoKeyDirectory: geographic (EPSG:4326), pixel-is-area
   const keys = [1, 1, 0, 3, 1024, 0, 1, 2, 1025, 0, 1, 1, 2048, 0, 1, 4326];
   for (let i = 0; i < keys.length; i++) dv.setUint16(geoKeyOff + i * 2, keys[i], true);
-  for (let i = 0; i < w * h; i++) dv.setFloat32(stripOff + i * 4, data[i], true);
+
+  // Write tile data (zero-padded at edges)
+  for (let ty = 0; ty < tilesY; ty++) {
+    for (let tx = 0; tx < tilesX; tx++) {
+      const tileOff = tileDataStart + (ty * tilesX + tx) * tileBytes;
+      for (let py = 0; py < tileH; py++) {
+        const srcRow = ty * tileH + py;
+        for (let px = 0; px < tileW; px++) {
+          const srcCol = tx * tileW + px;
+          const val = (srcRow < h && srcCol < w) ? data[srcRow * w + srcCol] : 0;
+          dv.setFloat32(tileOff + (py * tileW + px) * 4, val, true);
+        }
+      }
+    }
+  }
   return buf;
 }
 
@@ -483,29 +524,31 @@ export async function buildREMTile(z: number, x: number, y: number): Promise<Arr
   const havePts = riverPts.length > 0;
   const _t1 = performance.now(); // DEM fetch done
 
+  // Pre-decode terrarium tile → float32 elevation array (single pass, avoids repeating
+  // R*256+G+B/256-32768 inside the per-output-pixel 3×3 averaging loop).
+  let demFloat: Float32Array | null = null;
+  if (demData) {
+    const d = demData.data;
+    demFloat = new Float32Array(demSz * demSz);
+    for (let i = 0; i < demSz * demSz; i++) {
+      const i4 = i * 4;
+      demFloat[i] = d[i4] * 256 + d[i4 + 1] + d[i4 + 2] / 256 - 32768;
+    }
+  }
+  const _t2 = performance.now(); // terrarium decode done
+
   const rgba = new Uint8ClampedArray(outSz * outSz * 4);
 
   for (let py = 0; py < outSz; py++) {
     for (let px = 0; px < outSz; px++) {
       let demElev = 0;
-      if (demData) {
-        const d = demData.data;
+      if (demFloat) {
         // Fractional position inside the loaded DEM tile [0,1), accounting for overzoom.
         const u = (subX + (px + 0.5) / outSz) / span;
         const v = (subY + (py + 0.5) / outSz) / span;
-        const cx0 = Math.min(demSz - 1, Math.floor(u * demSz));
-        const cy0 = Math.min(demSz - 1, Math.floor(v * demSz));
-        // 3×3 average on decoded-float elevations to suppress any residual noise.
-        let sum = 0;
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
-            const nx = Math.min(demSz - 1, Math.max(0, cx0 + kx));
-            const ny = Math.min(demSz - 1, Math.max(0, cy0 + ky));
-            const i4 = (ny * demSz + nx) * 4;
-            sum += d[i4] * 256 + d[i4 + 1] + d[i4 + 2] / 256 - 32768;
-          }
-        }
-        demElev = sum / 9;
+        const cx = Math.min(demSz - 1, Math.floor(u * demSz));
+        const cy = Math.min(demSz - 1, Math.floor(v * demSz));
+        demElev = demFloat[cy * demSz + cx];
       }
       let wse = 0;
       if (havePts) {
@@ -518,19 +561,19 @@ export async function buildREMTile(z: number, x: number, y: number): Promise<Arr
       rgba[i] = r; rgba[i + 1] = g; rgba[i + 2] = b; rgba[i + 3] = 255;
     }
   }
-  const _t2 = performance.now(); // pixel loop done
+  const _t3 = performance.now(); // pixel loop done
   const buf = await encodePng(rgba, outSz, outSz);
-  const _t3 = performance.now(); // PNG encode done
+  const _t4 = performance.now(); // PNG encode done
   _perf.tileCount++;
-  const tileMs = _t3 - _t0;
-  _perf.lastTile = { demFetchMs: _t1 - _t0, pixelLoopMs: _t2 - _t1, pngEncodeMs: _t3 - _t2, totalMs: tileMs };
+  const tileMs = _t4 - _t0;
+  _perf.lastTile = { terrariumDecodeMs: _t2 - _t1, pixelLoopMs: _t3 - _t2, pngEncodeMs: _t4 - _t3, totalMs: tileMs };
   _perf.avgTileMs = _perf.avgTileMs === null ? tileMs : _perf.avgTileMs * 0.9 + tileMs * 0.1;
   tileCache.set(key, buf);
   return buf.slice(0); // copy — the cached original must survive worker transfer
 }
 
 // ── Perf stats ────────────────────────────────────────────────────────────────
-export type RemTilePerf = { demFetchMs: number; pixelLoopMs: number; pngEncodeMs: number; totalMs: number };
+export type RemTilePerf = { terrariumDecodeMs: number; pixelLoopMs: number; pngEncodeMs: number; totalMs: number };
 export type RemPerfStats = {
   wseGridMs: number | null;
   wseMode: string;
@@ -700,6 +743,113 @@ export async function sampleDemBounds(
     min: Math.floor(elevs[Math.floor(elevs.length * 0.05)]),
     max: Math.ceil(elevs[Math.floor(elevs.length * 0.95)]),
   };
+}
+
+/**
+ * Compute a single REM tile as raw Float32 metres — same pipeline as buildREMTile
+ * but returns float values instead of a PNG. Used by exportRemCog.
+ */
+async function computeRemTileF32(z: number, x: number, y: number, demOnly = false): Promise<Float32Array | null> {
+  const outSz = 256;
+  let demZoom = Math.min(z, remMaxZoom);
+  let demEntry: DecodedTile | null = null;
+  let dz = z - demZoom;
+  for (; demZoom >= 1; demZoom--, dz = z - demZoom) {
+    try { demEntry = await loadTileImage(demZoom, x >> dz, y >> dz); break; }
+    catch { /* missing tile, try parent */ }
+  }
+  if (!demEntry) return null;
+  const demData = demEntry.data;
+  const demSz = demEntry.sz;
+  const span = 1 << dz;
+  const subX = x - ((x >> dz) << dz);
+  const subY = y - ((y >> dz) << dz);
+  const lonW = tile2lon(x, z), lonE = tile2lon(x + 1, z);
+  const latN = tile2lat(y, z), latS = tile2lat(y + 1, z);
+  const d = demData.data;
+  const demFloat = new Float32Array(demSz * demSz);
+  for (let i = 0; i < demSz * demSz; i++) {
+    const i4 = i * 4;
+    demFloat[i] = d[i4] * 256 + d[i4 + 1] + d[i4 + 2] / 256 - 32768;
+  }
+  const out = new Float32Array(outSz * outSz);
+  for (let py = 0; py < outSz; py++) {
+    for (let px = 0; px < outSz; px++) {
+      const u = (subX + (px + 0.5) / outSz) / span;
+      const v = (subY + (py + 0.5) / outSz) / span;
+      const cx = Math.min(demSz - 1, Math.floor(u * demSz));
+      const cy = Math.min(demSz - 1, Math.floor(v * demSz));
+      const demElev = demFloat[cy * demSz + cx];
+      let wse = 0;
+      if (!demOnly && riverPts.length > 0) {
+        const lon = lonW + (px / outSz) * (lonE - lonW);
+        const lat = latN + (py / outSz) * (latS - latN);
+        wse = sampleWse(lonToMx(lon), latToMy(lat));
+      }
+      out[py * outSz + px] = demElev - wse;
+    }
+  }
+  return out;
+}
+
+async function _exportCogImpl(
+  bbox: { west: number; south: number; east: number; north: number },
+  tileZoom: number,
+  demOnly: boolean,
+  onProgress?: (done: number, total: number) => void,
+): Promise<ArrayBuffer> {
+  const z = tileZoom;
+  const x0 = lon2tile(bbox.west, z);
+  const x1 = lon2tile(bbox.east, z);
+  const y0 = lat2tile(bbox.north, z);
+  const y1 = lat2tile(bbox.south, z);
+  const nx = x1 - x0 + 1, ny = y1 - y0 + 1;
+  if (nx * ny > 1024) throw new Error(`Too many tiles (${nx * ny}) — lower zoom or reduce AOI`);
+  const W = nx * 256, H = ny * 256;
+  const mosaic = new Float32Array(W * H);
+  const total = nx * ny;
+  let done = 0;
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const f32 = await computeRemTileF32(z, tx, ty, demOnly);
+      const col = (tx - x0) * 256;
+      const row = (ty - y0) * 256;
+      if (f32) {
+        for (let py = 0; py < 256; py++)
+          mosaic.set(f32.subarray(py * 256, py * 256 + 256), (row + py) * W + col);
+      }
+      done++;
+      onProgress?.(done, total);
+    }
+  }
+  const lonW = tile2lon(x0, z), lonE = tile2lon(x1 + 1, z);
+  const latN = tile2lat(y0, z), latS = tile2lat(y1 + 1, z);
+  return encodeGeoTiffF32(mosaic, W, H, lonW, latN, lonE, latS);
+}
+
+/**
+ * Export the client-side REM over `bbox` at `tileZoom` as a single-band float32 GeoTIFF.
+ * Enumerates all covering tiles, computes each one, mosaics into one Float32Array,
+ * and encodes via encodeGeoTiffF32. Download the returned ArrayBuffer as a .tif.
+ */
+export async function exportRemCog(
+  bbox: { west: number; south: number; east: number; north: number },
+  tileZoom: number,
+  onProgress?: (done: number, total: number) => void,
+): Promise<ArrayBuffer> {
+  return _exportCogImpl(bbox, tileZoom, false, onProgress);
+}
+
+/**
+ * Export the raw DEM (no WSE subtraction) over `bbox` at `tileZoom` as a single-band float32 GeoTIFF.
+ * Same pipeline as exportRemCog but demOnly=true — outputs terrain elevation directly.
+ */
+export async function exportDemCog(
+  bbox: { west: number; south: number; east: number; north: number },
+  tileZoom: number,
+  onProgress?: (done: number, total: number) => void,
+): Promise<ArrayBuffer> {
+  return _exportCogImpl(bbox, tileZoom, true, onProgress);
 }
 
 // ── Tile diagnostics — download intermediate layers for QGIS inspection ──────

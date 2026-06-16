@@ -8,6 +8,13 @@
  * `out geom;` returns node coordinates inline, so no second node lookup is needed.
  */
 import type { BBox } from "./api";
+// @ts-ignore – CJS module, no default export in Vite's ESM wrapper
+import * as _VtLib from "@mapbox/vector-tile";
+const VectorTile: any = (_VtLib as any).default ?? _VtLib;
+// @ts-ignore – pbf is CJS; Vite wraps it without a named default export
+import * as _PbfLib from "pbf";
+const Protobuf: any = (_PbfLib as any).default ?? _PbfLib;
+import { PMTiles } from "pmtiles";
 
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
@@ -17,13 +24,17 @@ const OVERPASS_ENDPOINTS = [
 ];
 
 /** Selectable presets for the UI. QLever speaks SPARQL, not Overpass QL, so it is
- *  marked experimental — if it fails the fallback chain takes over. */
-export const OVERPASS_PRESETS: { label: string; url: string }[] = [
+ *  marked experimental — if it fails the fallback chain takes over.
+ *  beta=true entries are vector tile sources, shown in a separate section. */
+export const OVERPASS_PRESETS: { label: string; url: string; beta?: boolean }[] = [
   { label: "QLever (fast)", url: "https://qlever.dev/api/osm-planet" },
   { label: "overpass.de", url: "https://overpass-api.de/api/interpreter" },
   { label: "kumi.systems", url: "https://overpass.kumi.systems/api/interpreter" },
   { label: "private.coffee", url: "https://overpass.private.coffee/api/interpreter" },
   { label: "osm.ch", url: "https://overpass.osm.ch/api/interpreter" },
+  { label: "OSM Shortbread MVT", url: "https://vector.openstreetmap.org/shortbread_v1/{z}/{x}/{y}.mvt", beta: true },
+  { label: "OpenFreeMap MVT", url: "https://tiles.openfreemap.org/planet/20260607_080001_pt/{z}/{x}/{y}.pbf", beta: true },
+  { label: "Protomaps PMTiles", url: "https://demo-bucket.protomaps.com/v4.pmtiles", beta: true },
 ];
 
 type LngLat = [number, number];
@@ -46,6 +57,23 @@ function lineLength(coords: LngLat[]): number {
 export type RiverResult = { geojson: GeoJSON.FeatureCollection; name: string; length_m: number };
 
 type Pt = [number, number];
+
+/**
+ * Remove consecutive coordinates closer than `eps` degrees (Chebyshev distance).
+ * Keeps first and last point. O(n), no recursion.
+ * eps ≈ (bbox_width | bbox_height) / 1000 keeps ~1000 points per viewport width —
+ * well below any visible aliasing while sharply reducing payload for dense OSM ways.
+ */
+function simplifyCoords(coords: LngLat[], eps: number): LngLat[] {
+  if (coords.length <= 2) return coords;
+  const out: LngLat[] = [coords[0]];
+  for (let i = 1; i < coords.length - 1; i++) {
+    const prev = out[out.length - 1], c = coords[i];
+    if (Math.abs(c[0] - prev[0]) >= eps || Math.abs(c[1] - prev[1]) >= eps) out.push(c);
+  }
+  out.push(coords[coords.length - 1]);
+  return out;
+}
 
 /** Stitch LineStrings that share endpoints into continuous lines, so the preview
  *  shows (and /compute receives) the merged centerline — no IDW seams at OSM joins. */
@@ -122,7 +150,9 @@ function pickLongest(features: NamedLine[]): RiverResult {
 export async function fetchAllRivers(bbox: BBox, endpoint?: string): Promise<RiverResult[]> {
   const isQlever = !!endpoint && /qlever|sparql/i.test(endpoint);
   let features: NamedLine[];
-  if (isQlever) {
+  if (endpoint && (isMvt(endpoint) || isPmTiles(endpoint))) {
+    features = await fetchVectorTiles(bbox, endpoint);
+  } else if (isQlever) {
     try { features = await fetchQlever(bbox, endpoint!); }
     catch { features = await fetchOverpass(bbox, undefined); }
   } else {
@@ -131,7 +161,7 @@ export async function fetchAllRivers(bbox: BBox, endpoint?: string): Promise<Riv
   const byName = new Map<string, NamedLine[]>();
   for (const f of features) {
     const name = (f.properties as any)?.name;
-    if (!name || (f.geometry as any)?.type !== "LineString") continue;
+    if (!name || name === "unnamed" || (f.geometry as any)?.type !== "LineString") continue;
     const arr = byName.get(name) ?? [];
     arr.push(f);
     byName.set(name, arr);
@@ -141,6 +171,122 @@ export async function fetchAllRivers(bbox: BBox, endpoint?: string): Promise<Riv
     name,
     length_m: fs.reduce((s, f) => s + lineLength((f.geometry as any).coordinates as LngLat[]), 0),
   }));
+}
+
+// --- Vector tile helpers (MVT / PMTiles) ---
+const _lon2t = (lon: number, z: number) => Math.floor(((lon + 180) / 360) * 2 ** z);
+const _lat2t = (lat: number, z: number) =>
+  Math.floor(((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * 2 ** z);
+const _t2lon = (x: number, z: number) => (x / 2 ** z) * 360 - 180;
+const _t2lat = (y: number, z: number) => {
+  const n = Math.PI - (2 * Math.PI * y) / 2 ** z;
+  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+};
+
+const isMvt = (url: string) =>
+  url.includes("{z}") && (url.endsWith(".mvt") || url.endsWith(".pbf") || url.includes(".mvt?") || url.includes(".pbf?"));
+const isPmTiles = (url: string) => url.includes(".pmtiles");
+
+const WATERWAY_KINDS = new Set(["river", "stream", "canal", "tidal_channel", "drain", "ditch"]);
+
+function parseMvtBuffer(buf: ArrayBuffer, tx: number, ty: number, z: number, eps: number): NamedLine[] {
+  let tile: any;
+  try {
+    const Cls = VectorTile.VectorTile ?? VectorTile;
+    tile = new Cls(new Protobuf(buf));
+  } catch { return []; }
+  const allLayerNames = Object.keys(tile.layers);
+  console.log(`[mvt] ${z}/${tx}/${ty} layers:`, allLayerNames);
+
+  const features: NamedLine[] = [];
+  // Shortbread v1: water_lines (full geometry, no name) + water_lines_labels (simplified + name, z10+)
+  // OpenMapTiles: waterway (geometry + name)
+  // Process all three — water_lines_labels features are added as standalone named linestrings.
+  for (const layerName of ["water_lines", "water_lines_labels", "waterway"]) {
+    const layer = tile.layers[layerName];
+    if (!layer) continue;
+    const extent: number = layer.extent ?? 4096;
+    const lon0 = _t2lon(tx, z), lon1 = _t2lon(tx + 1, z);
+    const lat0 = _t2lat(ty, z), lat1 = _t2lat(ty + 1, z);
+    let added = 0;
+    for (let i = 0; i < layer.length; i++) {
+      const feat = layer.feature(i);
+      if (feat.type !== 2) continue; // 2 = LineString
+      const props = feat.properties as Record<string, any>;
+      const kind = String(props.kind ?? props.class ?? props.waterway ?? "");
+      if (kind && !WATERWAY_KINDS.has(kind)) continue;
+      const name = typeof props.name === "string" ? props.name : undefined;
+      const geom: { x: number; y: number }[][] = feat.loadGeometry();
+      for (const ring of geom) {
+        if (ring.length < 2) continue;
+        const coords: LngLat[] = ring.map((pt) => [
+          lon0 + (pt.x / extent) * (lon1 - lon0),
+          lat0 + (pt.y / extent) * (lat1 - lat0),
+        ]);
+        const simplified = eps > 0 ? simplifyCoords(coords, eps) : coords;
+        if (simplified.length < 2) continue;
+        features.push({
+          type: "Feature",
+          properties: { name: name ?? "unnamed" },
+          geometry: { type: "LineString", coordinates: simplified },
+        });
+        added++;
+      }
+    }
+    console.log(`[mvt] ${z}/${tx}/${ty} layer="${layerName}": ${added} waterway linestrings (layer total=${layer.length})`);
+  }
+  const named = features.filter((f) => f.properties.name !== "unnamed");
+  console.log(`[mvt] ${z}/${tx}/${ty} result: ${features.length} features, ${named.length} named`);
+  if (named.length > 0) console.log(`[mvt] sample names:`, named.slice(0, 5).map((f) => f.properties.name));
+  return features;
+}
+
+async function fetchMvtTiles(bbox: BBox, urlTemplate: string): Promise<NamedLine[]> {
+  const z = 12;
+  const eps = Math.max(bbox.east - bbox.west, bbox.north - bbox.south) / 1000;
+  const x0 = _lon2t(bbox.west, z), x1 = _lon2t(bbox.east, z);
+  const y0 = _lat2t(bbox.north, z), y1 = _lat2t(bbox.south, z);
+  const fetches: Promise<NamedLine[]>[] = [];
+  for (let tx = x0; tx <= x1; tx++) {
+    for (let ty = y0; ty <= y1; ty++) {
+      const url = urlTemplate.replace("{z}", String(z)).replace("{x}", String(tx)).replace("{y}", String(ty));
+      const _tx = tx, _ty = ty;
+      fetches.push(
+        fetch(url)
+          .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
+          .then((buf) => parseMvtBuffer(buf, _tx, _ty, z, eps))
+          .catch(() => [] as NamedLine[]),
+      );
+    }
+  }
+  return (await Promise.all(fetches)).flat();
+}
+
+const _pmTilesCache = new Map<string, PMTiles>();
+
+async function fetchPmTilesTiles(bbox: BBox, archiveUrl: string): Promise<NamedLine[]> {
+  let pm = _pmTilesCache.get(archiveUrl);
+  if (!pm) { pm = new PMTiles(archiveUrl); _pmTilesCache.set(archiveUrl, pm); }
+  const z = 12;
+  const eps = Math.max(bbox.east - bbox.west, bbox.north - bbox.south) / 1000;
+  const x0 = _lon2t(bbox.west, z), x1 = _lon2t(bbox.east, z);
+  const y0 = _lat2t(bbox.north, z), y1 = _lat2t(bbox.south, z);
+  const fetches: Promise<NamedLine[]>[] = [];
+  for (let tx = x0; tx <= x1; tx++) {
+    for (let ty = y0; ty <= y1; ty++) {
+      const _tx = tx, _ty = ty;
+      fetches.push(
+        pm.getZxy(z, tx, ty)
+          .then((resp) => (resp ? parseMvtBuffer(resp.data, _tx, _ty, z, eps) : []))
+          .catch(() => [] as NamedLine[]),
+      );
+    }
+  }
+  return (await Promise.all(fetches)).flat();
+}
+
+async function fetchVectorTiles(bbox: BBox, endpoint: string): Promise<NamedLine[]> {
+  return isMvt(endpoint) ? fetchMvtTiles(bbox, endpoint) : fetchPmTilesTiles(bbox, endpoint);
 }
 
 // --- Overpass QL ---
@@ -175,10 +321,12 @@ async function fetchOverpass(bbox: BBox, endpoint?: string): Promise<NamedLine[]
 
 // --- QLever (SPARQL over the osm2rdf / GeoSPARQL planet) ---
 // Best-effort query; if it fails we fall back to Overpass QL. WKT is lon/lat (CRS84).
-function wktToFeatures(name: string, wkt: string): NamedLine[] {
+function wktToFeatures(name: string, wkt: string, eps = 0): NamedLine[] {
   const out: NamedLine[] = [];
-  const parse = (body: string): LngLat[] =>
-    body.trim().split(",").map((p) => p.trim().split(/\s+/).map(Number) as LngLat);
+  const parse = (body: string): LngLat[] => {
+    const raw = body.trim().split(",").map((p) => p.trim().split(/\s+/).map(Number) as LngLat);
+    return eps > 0 ? simplifyCoords(raw, eps) : raw;
+  };
   const up = wkt.toUpperCase();
   if (up.startsWith("LINESTRING")) {
     const m = wkt.match(/\(([^()]*)\)/);
@@ -192,6 +340,7 @@ function wktToFeatures(name: string, wkt: string): NamedLine[] {
 
 /** Fetch ALL waterways in the bbox regardless of name (includes unnamed streams). */
 async function fetchQleverAll(bbox: BBox, endpoint: string): Promise<NamedLine[]> {
+  const eps = Math.max(bbox.east - bbox.west, bbox.north - bbox.south) / 1000;
   const poly =
     `POLYGON((${bbox.west} ${bbox.south},${bbox.east} ${bbox.south},` +
     `${bbox.east} ${bbox.north},${bbox.west} ${bbox.north},${bbox.west} ${bbox.south}))`;
@@ -228,13 +377,14 @@ SELECT ?name ?wkt WHERE {
   for (const r of rows) {
     const name = r.name?.value ?? "unnamed";
     const wkt = (r.wkt?.value ?? "").replace(/^<[^>]*>\s*/, "");
-    if (wkt) feats.push(...wktToFeatures(name, wkt));
+    if (wkt) feats.push(...wktToFeatures(name, wkt, eps));
   }
   if (feats.length === 0) throw new Error("QLever returned no waterways");
   return feats;
 }
 
 async function fetchQlever(bbox: BBox, endpoint: string): Promise<NamedLine[]> {
+  const eps = Math.max(bbox.east - bbox.west, bbox.north - bbox.south) / 1000;
   const poly =
     `POLYGON((${bbox.west} ${bbox.south},${bbox.east} ${bbox.south},` +
     `${bbox.east} ${bbox.north},${bbox.west} ${bbox.north},${bbox.west} ${bbox.south}))`;
@@ -274,30 +424,32 @@ SELECT ?name ?wkt WHERE {
   for (const r of rows) {
     const name = r.name?.value;
     const wkt = (r.wkt?.value ?? "").replace(/^<[^>]*>\s*/, ""); // strip optional CRS URI
-    if (name && wkt) feats.push(...wktToFeatures(name, wkt));
+    if (name && wkt) feats.push(...wktToFeatures(name, wkt, eps));
   }
   if (feats.length === 0) throw new Error("QLever returned no waterways");
   return feats;
 }
 
-/** Fetch all waterways (named + unnamed) as a single merged FeatureCollection. Qlever only. */
+/** Fetch all waterways (named + unnamed) as a single merged FeatureCollection. */
 export async function fetchAllWaterways(bbox: BBox, endpoint: string): Promise<{ geojson: GeoJSON.FeatureCollection; count: number }> {
-  const feats = await fetchQleverAll(bbox, endpoint);
-  const fc: GeoJSON.FeatureCollection = {
-    type: "FeatureCollection",
-    features: feats,
-  };
+  let feats: NamedLine[];
+  if (isMvt(endpoint) || isPmTiles(endpoint)) {
+    feats = await fetchVectorTiles(bbox, endpoint);
+  } else {
+    feats = await fetchQleverAll(bbox, endpoint);
+  }
+  const fc: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: feats };
   return { geojson: fc, count: feats.length };
 }
 
 export async function fetchLongestRiver(bbox: BBox, endpoint?: string): Promise<RiverResult> {
+  if (endpoint && (isMvt(endpoint) || isPmTiles(endpoint))) {
+    return pickLongest(await fetchVectorTiles(bbox, endpoint));
+  }
   const isQlever = !!endpoint && /qlever|sparql/i.test(endpoint);
   if (isQlever) {
-    try {
-      return pickLongest(await fetchQlever(bbox, endpoint!));
-    } catch {
-      /* fall through to Overpass mirrors */
-    }
+    try { return pickLongest(await fetchQlever(bbox, endpoint!)); }
+    catch { /* fall through to Overpass mirrors */ }
   }
   return pickLongest(await fetchOverpass(bbox, isQlever ? undefined : endpoint));
 }

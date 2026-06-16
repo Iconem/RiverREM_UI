@@ -66,6 +66,7 @@ export function useRemOptions() {
     showRiver: parseAsBoolean.withDefault(true),
     showSamples: parseAsBoolean.withDefault(false),
     showViewport: parseAsBoolean.withDefault(false),
+    live: parseAsBoolean.withDefault(false), // live mode: debounced bbox refetch, no run created
   });
 }
 
