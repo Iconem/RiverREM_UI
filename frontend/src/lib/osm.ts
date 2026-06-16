@@ -8,12 +8,10 @@
  * `out geom;` returns node coordinates inline, so no second node lookup is needed.
  */
 import type { BBox } from "./api";
-// @ts-ignore – CJS module, no default export in Vite's ESM wrapper
-import * as _VtLib from "@mapbox/vector-tile";
-const VectorTile: any = (_VtLib as any).default ?? _VtLib;
-// @ts-ignore – pbf is CJS; Vite wraps it without a named default export
-import * as _PbfLib from "pbf";
-const Protobuf: any = (_PbfLib as any).default ?? _PbfLib;
+// @ts-ignore – pbf v5 / @mapbox/vector-tile v3 are ESM with named exports
+import { VectorTile } from "@mapbox/vector-tile";
+// @ts-ignore
+import { PbfReader } from "pbf";
 import { PMTiles } from "pmtiles";
 
 const OVERPASS_ENDPOINTS = [
@@ -147,16 +145,16 @@ function pickLongest(features: NamedLine[]): RiverResult {
 }
 
 /** Return all named waterways in the bbox, grouped by name (one RiverResult per name). */
-export async function fetchAllRivers(bbox: BBox, endpoint?: string): Promise<RiverResult[]> {
+export async function fetchAllRivers(bbox: BBox, endpoint?: string, polyWater = false, groupBy = false, signal?: AbortSignal): Promise<RiverResult[]> {
   const isQlever = !!endpoint && /qlever|sparql/i.test(endpoint);
   let features: NamedLine[];
   if (endpoint && (isMvt(endpoint) || isPmTiles(endpoint))) {
-    features = await fetchVectorTiles(bbox, endpoint);
+    features = await fetchVectorTiles(bbox, endpoint, polyWater);
   } else if (isQlever) {
-    try { features = await fetchQlever(bbox, endpoint!); }
-    catch { features = await fetchOverpass(bbox, undefined); }
+    try { features = await fetchQlever(bbox, endpoint!, groupBy, signal); }
+    catch (e) { if ((e as Error).name === "AbortError") throw e; features = await fetchOverpass(bbox, undefined, signal); }
   } else {
-    features = await fetchOverpass(bbox, endpoint);
+    features = await fetchOverpass(bbox, endpoint, signal);
   }
   const byName = new Map<string, NamedLine[]>();
   for (const f of features) {
@@ -189,59 +187,55 @@ const isPmTiles = (url: string) => url.includes(".pmtiles");
 
 const WATERWAY_KINDS = new Set(["river", "stream", "canal", "tidal_channel", "drain", "ditch"]);
 
-function parseMvtBuffer(buf: ArrayBuffer, tx: number, ty: number, z: number, eps: number): NamedLine[] {
+function parseMvtBuffer(buf: ArrayBuffer, tx: number, ty: number, z: number, eps: number, polyWater: boolean): NamedLine[] {
+  if (buf.byteLength === 0) return [];
   let tile: any;
   try {
-    const Cls = VectorTile.VectorTile ?? VectorTile;
-    tile = new Cls(new Protobuf(buf));
-  } catch { return []; }
-  const allLayerNames = Object.keys(tile.layers);
-  console.log(`[mvt] ${z}/${tx}/${ty} layers:`, allLayerNames);
-
+    tile = new VectorTile(new PbfReader(new Uint8Array(buf)));
+  } catch (e) {
+    console.log(`[mvt] PARSE ERROR:`, String(e));
+    return [];
+  }
   const features: NamedLine[] = [];
-  // Shortbread v1: water_lines (full geometry, no name) + water_lines_labels (simplified + name, z10+)
-  // OpenMapTiles: waterway (geometry + name)
-  // Process all three — water_lines_labels features are added as standalone named linestrings.
-  for (const layerName of ["water_lines", "water_lines_labels", "waterway"]) {
+  // Shortbread v1:    water_lines / water_lines_labels
+  // OpenMapTiles/OpenFreeMap: waterway  (class attr)
+  // Protomaps v4:     water  (pmap:kind attr, lines and polygons)
+  for (const layerName of ["water_lines", "water_lines_labels", "waterway", "water"]) {
     const layer = tile.layers[layerName];
     if (!layer) continue;
-    const extent: number = layer.extent ?? 4096;
-    const lon0 = _t2lon(tx, z), lon1 = _t2lon(tx + 1, z);
-    const lat0 = _t2lat(ty, z), lat1 = _t2lat(ty + 1, z);
-    let added = 0;
     for (let i = 0; i < layer.length; i++) {
       const feat = layer.feature(i);
-      if (feat.type !== 2) continue; // 2 = LineString
+      if (feat.type !== 2 && feat.type !== 3) continue; // skip points
       const props = feat.properties as Record<string, any>;
-      const kind = String(props.kind ?? props.class ?? props.waterway ?? "");
+      const kind = String(props["pmap:kind"] ?? props.kind ?? props.class ?? props.waterway ?? "");
       if (kind && !WATERWAY_KINDS.has(kind)) continue;
       const name = typeof props.name === "string" ? props.name : undefined;
-      const geom: { x: number; y: number }[][] = feat.loadGeometry();
-      for (const ring of geom) {
-        if (ring.length < 2) continue;
-        const coords: LngLat[] = ring.map((pt) => [
-          lon0 + (pt.x / extent) * (lon1 - lon0),
-          lat0 + (pt.y / extent) * (lat1 - lat0),
-        ]);
+
+      if (feat.type === 2) {
+        const gf = feat.toGeoJSON(tx, ty, z) as GeoJSON.Feature<GeoJSON.LineString>;
+        const coords = gf.geometry.coordinates as LngLat[];
         const simplified = eps > 0 ? simplifyCoords(coords, eps) : coords;
         if (simplified.length < 2) continue;
-        features.push({
-          type: "Feature",
-          properties: { name: name ?? "unnamed" },
-          geometry: { type: "LineString", coordinates: simplified },
-        });
-        added++;
+        features.push({ type: "Feature", properties: { name: name ?? "unnamed" }, geometry: { type: "LineString", coordinates: simplified } });
+      } else if (polyWater) {
+        // Polygon — extract exterior ring(s) as open LineStrings (drop closing coord)
+        const gf = feat.toGeoJSON(tx, ty, z) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+        const rings: LngLat[][] = gf.geometry.type === "Polygon"
+          ? [gf.geometry.coordinates[0] as LngLat[]]
+          : gf.geometry.coordinates.map((p) => p[0] as LngLat[]);
+        for (const ring of rings) {
+          const coords = ring.slice(0, -1); // remove closing duplicate
+          const simplified = eps > 0 ? simplifyCoords(coords, eps) : coords;
+          if (simplified.length < 2) continue;
+          features.push({ type: "Feature", properties: { name: name ?? "unnamed" }, geometry: { type: "LineString", coordinates: simplified } });
+        }
       }
     }
-    console.log(`[mvt] ${z}/${tx}/${ty} layer="${layerName}": ${added} waterway linestrings (layer total=${layer.length})`);
   }
-  const named = features.filter((f) => f.properties.name !== "unnamed");
-  console.log(`[mvt] ${z}/${tx}/${ty} result: ${features.length} features, ${named.length} named`);
-  if (named.length > 0) console.log(`[mvt] sample names:`, named.slice(0, 5).map((f) => f.properties.name));
   return features;
 }
 
-async function fetchMvtTiles(bbox: BBox, urlTemplate: string): Promise<NamedLine[]> {
+async function fetchMvtTiles(bbox: BBox, urlTemplate: string, polyWater: boolean): Promise<NamedLine[]> {
   const z = 12;
   const eps = Math.max(bbox.east - bbox.west, bbox.north - bbox.south) / 1000;
   const x0 = _lon2t(bbox.west, z), x1 = _lon2t(bbox.east, z);
@@ -253,8 +247,8 @@ async function fetchMvtTiles(bbox: BBox, urlTemplate: string): Promise<NamedLine
       const _tx = tx, _ty = ty;
       fetches.push(
         fetch(url)
-          .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
-          .then((buf) => parseMvtBuffer(buf, _tx, _ty, z, eps))
+          .then((r) => r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`)))
+          .then((buf) => parseMvtBuffer(buf, _tx, _ty, z, eps, polyWater))
           .catch(() => [] as NamedLine[]),
       );
     }
@@ -264,7 +258,7 @@ async function fetchMvtTiles(bbox: BBox, urlTemplate: string): Promise<NamedLine
 
 const _pmTilesCache = new Map<string, PMTiles>();
 
-async function fetchPmTilesTiles(bbox: BBox, archiveUrl: string): Promise<NamedLine[]> {
+async function fetchPmTilesTiles(bbox: BBox, archiveUrl: string, polyWater: boolean): Promise<NamedLine[]> {
   let pm = _pmTilesCache.get(archiveUrl);
   if (!pm) { pm = new PMTiles(archiveUrl); _pmTilesCache.set(archiveUrl, pm); }
   const z = 12;
@@ -277,7 +271,7 @@ async function fetchPmTilesTiles(bbox: BBox, archiveUrl: string): Promise<NamedL
       const _tx = tx, _ty = ty;
       fetches.push(
         pm.getZxy(z, tx, ty)
-          .then((resp) => (resp ? parseMvtBuffer(resp.data, _tx, _ty, z, eps) : []))
+          .then((resp) => (resp ? parseMvtBuffer(resp.data, _tx, _ty, z, eps, polyWater) : []))
           .catch(() => [] as NamedLine[]),
       );
     }
@@ -285,12 +279,12 @@ async function fetchPmTilesTiles(bbox: BBox, archiveUrl: string): Promise<NamedL
   return (await Promise.all(fetches)).flat();
 }
 
-async function fetchVectorTiles(bbox: BBox, endpoint: string): Promise<NamedLine[]> {
-  return isMvt(endpoint) ? fetchMvtTiles(bbox, endpoint) : fetchPmTilesTiles(bbox, endpoint);
+async function fetchVectorTiles(bbox: BBox, endpoint: string, polyWater = false): Promise<NamedLine[]> {
+  return isMvt(endpoint) ? fetchMvtTiles(bbox, endpoint, polyWater) : fetchPmTilesTiles(bbox, endpoint, polyWater);
 }
 
 // --- Overpass QL ---
-async function fetchOverpass(bbox: BBox, endpoint?: string): Promise<NamedLine[]> {
+async function fetchOverpass(bbox: BBox, endpoint?: string, signal?: AbortSignal): Promise<NamedLine[]> {
   const q =
     `[out:json][timeout:25];` +
     `(way["waterway"~"^(river|stream|tidal_channel)$"]` +
@@ -303,6 +297,7 @@ async function fetchOverpass(bbox: BBox, endpoint?: string): Promise<NamedLine[]
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: "data=" + encodeURIComponent(q),
+        signal,
       });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       data = await res.json();
@@ -339,7 +334,7 @@ function wktToFeatures(name: string, wkt: string, eps = 0): NamedLine[] {
 }
 
 /** Fetch ALL waterways in the bbox regardless of name (includes unnamed streams). */
-async function fetchQleverAll(bbox: BBox, endpoint: string): Promise<NamedLine[]> {
+async function fetchQleverAll(bbox: BBox, endpoint: string, signal?: AbortSignal): Promise<NamedLine[]> {
   const eps = Math.max(bbox.east - bbox.west, bbox.north - bbox.south) / 1000;
   const poly =
     `POLYGON((${bbox.west} ${bbox.south},${bbox.east} ${bbox.south},` +
@@ -364,11 +359,12 @@ SELECT ?name ?wkt WHERE {
       FILTER(?ww = "river" || ?ww = "stream" || ?ww = "tidal_channel" || ?ww = "canal" || ?ww = "drain")
     }
   }
-} LIMIT 5000`;
+} LIMIT 20000`;
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/sparql-results+json" },
     body: "query=" + encodeURIComponent(sparql),
+    signal,
   });
   if (!res.ok) throw new Error(`QLever ${res.status}`);
   const json = await res.json();
@@ -383,12 +379,35 @@ SELECT ?name ?wkt WHERE {
   return feats;
 }
 
-async function fetchQlever(bbox: BBox, endpoint: string): Promise<NamedLine[]> {
+async function fetchQlever(bbox: BBox, endpoint: string, groupBy = false, signal?: AbortSignal): Promise<NamedLine[]> {
   const eps = Math.max(bbox.east - bbox.west, bbox.north - bbox.south) / 1000;
   const poly =
     `POLYGON((${bbox.west} ${bbox.south},${bbox.east} ${bbox.south},` +
     `${bbox.east} ${bbox.north},${bbox.west} ${bbox.north},${bbox.west} ${bbox.south}))`;
-  const sparql = `
+  // groupBy=true: GROUP BY ?name collapses segments → LIMIT = distinct rivers, no geographic
+  // clipping. Slower (full aggregation before first result). URL opt-in: ?qleverGroupBy=true.
+  // groupBy=false (default): per-segment, ORDER BY ?name, LIMIT 50000. Fast; may clip at
+  // continent scale but ORDER BY keeps each river's segments contiguous so stitchLines works.
+  const sparql = groupBy ? `
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+PREFIX osmkey: <https://www.openstreetmap.org/wiki/Key:>
+PREFIX spatialSearch: <https://qlever.cs.uni-freiburg.de/spatialSearch/>
+SELECT ?name (GROUP_CONCAT(STR(?wkt); SEPARATOR=" ||| ") AS ?allwkt) WHERE {
+  BIND("${poly}"^^geo:wktLiteral AS ?area)
+  SERVICE spatialSearch: {
+    _:config spatialSearch:algorithm spatialSearch:libspatialjoin ;
+             spatialSearch:joinType spatialSearch:intersects ;
+             spatialSearch:left ?area ;
+             spatialSearch:right ?wkt ;
+             spatialSearch:payload ?name .
+    {
+      ?osm osmkey:waterway ?ww .
+      ?osm osmkey:name ?name .
+      ?osm geo:hasGeometry/geo:asWKT ?wkt .
+      FILTER(?ww = "river" || ?ww = "stream" || ?ww = "tidal_channel")
+    }
+  }
+} GROUP BY ?name LIMIT 5000` : `
 PREFIX geo: <http://www.opengis.net/ont/geosparql#>
 PREFIX osmkey: <https://www.openstreetmap.org/wiki/Key:>
 PREFIX spatialSearch: <https://qlever.cs.uni-freiburg.de/spatialSearch/>
@@ -407,49 +426,58 @@ SELECT ?name ?wkt WHERE {
       FILTER(?ww = "river" || ?ww = "stream" || ?ww = "tidal_channel")
     }
   }
-} LIMIT 5000`;
-  // Use a "simple" CORS request (form-encoded body + only safelisted headers) so the
-  // browser skips the OPTIONS preflight — qlever's endpoint 308-redirects preflights,
-  // which CORS forbids. Accept is a safelisted header; application/x-www-form-urlencoded
-  // is a safelisted content-type.
+} ORDER BY ?name LIMIT 50000`;
+  // Simple CORS request — no OPTIONS preflight (qlever 308-redirects preflights).
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/sparql-results+json" },
     body: "query=" + encodeURIComponent(sparql),
+    signal,
   });
   if (!res.ok) throw new Error(`QLever ${res.status}`);
   const json = await res.json();
   const rows = json?.results?.bindings ?? [];
   const feats: NamedLine[] = [];
-  for (const r of rows) {
-    const name = r.name?.value;
-    const wkt = (r.wkt?.value ?? "").replace(/^<[^>]*>\s*/, ""); // strip optional CRS URI
-    if (name && wkt) feats.push(...wktToFeatures(name, wkt, eps));
+  if (groupBy) {
+    for (const r of rows) {
+      const name = r.name?.value;
+      if (!name) continue;
+      for (const seg of (r.allwkt?.value ?? "").split(" ||| ")) {
+        const wkt = seg.trim().replace(/^<[^>]*>\s*/, "");
+        if (wkt) feats.push(...wktToFeatures(name, wkt, eps));
+      }
+    }
+  } else {
+    for (const r of rows) {
+      const name = r.name?.value;
+      const wkt = (r.wkt?.value ?? "").replace(/^<[^>]*>\s*/, "");
+      if (name && wkt) feats.push(...wktToFeatures(name, wkt, eps));
+    }
   }
   if (feats.length === 0) throw new Error("QLever returned no waterways");
   return feats;
 }
 
 /** Fetch all waterways (named + unnamed) as a single merged FeatureCollection. */
-export async function fetchAllWaterways(bbox: BBox, endpoint: string): Promise<{ geojson: GeoJSON.FeatureCollection; count: number }> {
+export async function fetchAllWaterways(bbox: BBox, endpoint: string, polyWater = false, signal?: AbortSignal): Promise<{ geojson: GeoJSON.FeatureCollection; count: number }> {
   let feats: NamedLine[];
   if (isMvt(endpoint) || isPmTiles(endpoint)) {
-    feats = await fetchVectorTiles(bbox, endpoint);
+    feats = await fetchVectorTiles(bbox, endpoint, polyWater);
   } else {
-    feats = await fetchQleverAll(bbox, endpoint);
+    feats = await fetchQleverAll(bbox, endpoint, signal);
   }
   const fc: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: feats };
   return { geojson: fc, count: feats.length };
 }
 
-export async function fetchLongestRiver(bbox: BBox, endpoint?: string): Promise<RiverResult> {
+export async function fetchLongestRiver(bbox: BBox, endpoint?: string, polyWater = false, groupBy = false, signal?: AbortSignal): Promise<RiverResult> {
   if (endpoint && (isMvt(endpoint) || isPmTiles(endpoint))) {
-    return pickLongest(await fetchVectorTiles(bbox, endpoint));
+    return pickLongest(await fetchVectorTiles(bbox, endpoint, polyWater));
   }
   const isQlever = !!endpoint && /qlever|sparql/i.test(endpoint);
   if (isQlever) {
-    try { return pickLongest(await fetchQlever(bbox, endpoint!)); }
-    catch { /* fall through to Overpass mirrors */ }
+    try { return pickLongest(await fetchQlever(bbox, endpoint!, groupBy, signal)); }
+    catch (e) { if ((e as Error).name === "AbortError") throw e; /* fall through to Overpass mirrors */ }
   }
-  return pickLongest(await fetchOverpass(bbox, isQlever ? undefined : endpoint));
+  return pickLongest(await fetchOverpass(bbox, isQlever ? undefined : endpoint, signal));
 }

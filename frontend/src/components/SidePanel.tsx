@@ -22,10 +22,12 @@ import type { ComputeResponse, GeoHit } from "@/lib/api";
 type Opts = {
   mode: "osm" | "geojson" | "shapefile";
   engine: "server" | "client"; power: number; interp: "idw" | "jfa" | "edt"; samples: number; beta: boolean;
-  base: "dark" | "light" | "satellite" | "hillshade" | "none";
+  base: "dark" | "light" | "satellite" | "hillshade" | "liberty" | "osm-dark" | "none";
   ramp: (typeof RAMP_NAMES)[number];
   reverse: boolean; transparent: "none" | "white" | "black"; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; sliderLo: number | null; sliderHi: number | null; osm: string;
   qleverMode: "longest" | "all" | "waterways";
+  polyWater: boolean;
+  qleverGroupBy: boolean;
   showContours: boolean;
   showContourLabels: boolean;
   showRiver: boolean;
@@ -242,7 +244,7 @@ export function SidePanel(p: {
                         <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>
                       ))}
                       <div className="my-1 border-t border-border" />
-                      <div className="px-2 pb-1 pt-0.5 font-mono text-[9px] uppercase tracking-wide text-foreground">OSM Vector tiles (beta)</div>
+                      <div className="px-2 pb-1 pt-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">OSM Vector tiles</div>
                       {OVERPASS_PRESETS.filter((o) => o.beta).map((o) => (
                         <SelectItem key={o.url} value={o.url}>{o.label}</SelectItem>
                       ))}
@@ -265,9 +267,14 @@ export function SidePanel(p: {
                   </div>
                 </div>
               )}
-              <Button variant="outline" size="sm" className="w-full gap-1" onClick={p.onPreview} disabled={busy || p.previewBusy}>
-                {p.previewBusy && <Loader2 className="h-3 w-3 animate-spin" />}
-                {opts.osm.includes("qlever") && opts.qleverMode === "all" ? "Preview named rivers" : opts.osm.includes("qlever") && opts.qleverMode === "waterways" ? "Preview all waterways" : "Preview longest river"}
+              {OVERPASS_PRESETS.find((pr) => pr.url === opts.osm)?.beta && (
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-xs">Include water areas</Label>
+                  <Switch checked={opts.polyWater} onCheckedChange={(v) => setOpts({ polyWater: v })} />
+                </div>
+              )}
+              <Button variant="outline" size="sm" className="w-full gap-1" onClick={p.onPreview} disabled={busy && !p.previewBusy}>
+                {p.previewBusy ? <><span className="relative inline-flex h-3 w-3 shrink-0"><Loader2 className="h-3 w-3 animate-spin" /><X className="absolute inset-0 m-auto h-2 w-2" /></span>Abort Fetching…</> : opts.qleverMode === "all" ? "Preview named rivers" : opts.qleverMode === "waterways" ? "Preview all waterways" : "Preview longest river"}
               </Button>
             </>
           )}
@@ -307,26 +314,28 @@ export function SidePanel(p: {
             </Tabs>
           </div>
 
-          {opts.engine === "client" && opts.beta && (
+          {opts.engine === "client" && (
             <div className="flex items-center justify-between">
               <Label>WSE interpolation</Label>
               <Tabs value={opts.interp} onValueChange={(v) => setOpts({ interp: v as Opts["interp"] })}>
                 <TabsList className="w-auto">
-                  <TabsTrigger value="idw" className="px-3" title="Inverse Distance Weighting — original REM algorithm by Dan Coe. Power-weighted mean over all river samples. CPU only.">IDW</TabsTrigger>
+                  <TabsTrigger value="idw" className="px-3" title="Inverse Distance Weighting: original REM algorithm by Dan Coe. Power-weighted mean over all river samples. CPU only.">IDW</TabsTrigger>
                   <TabsTrigger value="jfa" className="px-3" title="Nearest-on-polyline: each cell projects onto the closest river segment, WSE lerped at t. CPU only. (GPU variant = Jump Flood Algorithm.)">JFA</TabsTrigger>
-                  <TabsTrigger value="edt" className="px-3" title="Rasterize centerline → Felzenszwalb-Huttenlocher 2-pass distance transform. O(cells), slight raster aliasing vs JFA. CPU only.">EDT</TabsTrigger>
+                  <TabsTrigger value="edt" className="px-3" title="EDT (Euclidean Distance Transform): rasterize centerline → Felzenszwalb-Huttenlocher 2-pass distance transform. O(cells), slight raster aliasing vs JFA. CPU only.">EDT</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
           )}
 
-          {opts.engine === "client" && opts.beta && (
+          {opts.engine === "client" && (
             <div className="flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-1">
                   <Label>Live mode</Label>
                   {opts.interp === "idw" && (
-                    <TriangleAlert className="h-3 w-3 text-amber-400" title="IDW recomputes every sample on every tile — slow in live mode. Switch to JFA or EDT for smooth panning." />
+                    <span title="IDW recomputes every sample on every tile — slow in live mode. Switch to JFA or EDT for smooth panning.">
+                      <TriangleAlert className="h-3 w-3 text-amber-400" />
+                    </span>
                   )}
                 </div>
                 <p className="font-mono text-[10px] text-muted-foreground">
@@ -376,9 +385,9 @@ export function SidePanel(p: {
             </div>
           )}
 
-          <Button className="h-10 w-full" onClick={p.onCompute} disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            {busy ? "Computing…" : "Compute REM"}
+          <Button className="h-10 w-full" onClick={p.onCompute}>
+            {busy ? <span className="relative inline-flex h-4 w-4 shrink-0"><Loader2 className="h-4 w-4 animate-spin" /><X className="absolute inset-0 m-auto h-2.5 w-2.5" /></span> : <Play className="h-4 w-4" />}
+            {busy ? "Abort Computing…" : "Compute REM"}
           </Button>
           <Progress active={busy} label={p.phase} pct={p.pct} />
           {!busy && p.resNote && (
@@ -586,11 +595,13 @@ export function SidePanel(p: {
               <Select value={opts.base} onValueChange={(v) => setOpts({ base: v as Opts["base"] })}>
                 <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="dark">Dark (OSM)</SelectItem>
-                  <SelectItem value="light">Light (OSM)</SelectItem>
-                  <SelectItem value="satellite">Satellite (Esri)</SelectItem>
-                  <SelectItem value="hillshade">Hillshade (Mapterhorn)</SelectItem>
+                  <SelectItem value="satellite">Satellite (ESRI)</SelectItem>
+                  <SelectItem value="hillshade">Hillshade</SelectItem>
                   <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="liberty">Light (OpenFreeMap Liberty)</SelectItem>
+                  <SelectItem value="osm-dark">Dark (Maptiler w. OFM tiles)</SelectItem>
+                  <SelectItem value="light">Light (OSM)</SelectItem>
+                  <SelectItem value="dark">Dark (OSM)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -724,13 +735,13 @@ export function SidePanel(p: {
                   onClick={opts.engine === "client"
                     ? async () => { if (!p.onExportClientDemCog) return; setDemExporting(true); try { await p.onExportClientDemCog(cogZoom); } finally { setDemExporting(false); } }
                     : p.onExportDem}
-                  disabled={opts.engine === "client" ? (demExporting || !p.onExportClientDemCog) : !result.dem_url}
+                  disabled={opts.engine === "client" ? (demExporting || !p.onExportClientDemCog) : !result?.dem_url}
                   className={opts.engine === "client" ? "border-amber-400/20 text-amber-400/40 hover:text-amber-400/60" : ""}>
                   {demExporting ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : opts.engine === "client" ? <TriangleAlert className="mr-1 h-3 w-3 shrink-0" /> : <FileDown className="mr-1 h-3 w-3" />}
                   {demExporting ? "Exporting…" : "DEM COG"}
                 </Button>
               </div>
-              {opts.engine === "client" && (() => {
+              {opts.engine === "client" && result && (() => {
                 const b = result.bounds;
                 const lon2t = (lon: number, z: number) => Math.floor(((lon + 180) / 360) * 2 ** z);
                 const lat2t = (lat: number, z: number) => Math.floor(((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * 2 ** z);
@@ -755,18 +766,20 @@ export function SidePanel(p: {
                   </div>
                 );
               })()}
-              <Button variant="ghost" size="sm" className="h-7 w-full gap-1 text-xs"
-                disabled={opts.engine === "client"}
-                title={opts.engine === "client" ? "cog-viewer is only available for server runs" : undefined}
-                onClick={() => {
-                  const dem = p.layer === "dem" && result.dem_url;
-                  const url = dem ? result.dem_url! : result.cog_url;
-                  window.open(
-                    `https://source-cooperative.github.io/cog-viewer/?url=${encodeURIComponent(url)}&mode=single&bands=1&rescale=${opts.min},${opts.max}&panel=open`,
-                    "_blank", "noreferrer");
-                }}>
-                <ExternalLink className="h-3 w-3" />View {p.layer === "dem" && result.dem_url ? "DEM" : "REM"} in cog-viewer
-              </Button>
+              {result && (
+                <Button variant="ghost" size="sm" className="h-7 w-full gap-1 text-xs"
+                  disabled={opts.engine === "client"}
+                  title={opts.engine === "client" ? "cog-viewer is only available for server runs" : undefined}
+                  onClick={() => {
+                    const dem = p.layer === "dem" && result.dem_url;
+                    const url = dem ? result.dem_url! : result.cog_url;
+                    window.open(
+                      `https://source-cooperative.github.io/cog-viewer/?url=${encodeURIComponent(url)}&mode=single&bands=1&rescale=${opts.min},${opts.max}&panel=open`,
+                      "_blank", "noreferrer");
+                  }}>
+                  <ExternalLink className="h-3 w-3" />View {p.layer === "dem" && result.dem_url ? "DEM" : "REM"} in cog-viewer
+                </Button>
+              )}
             </>)}
           </div>
         </>

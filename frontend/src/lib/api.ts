@@ -61,17 +61,18 @@ export type JobStatus = {
   error?: string;
 };
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? r.statusText);
   return r.json();
 }
-async function get<T>(path: string): Promise<T> {
-  const r = await fetch(`${BASE}${path}`);
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, { signal });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? r.statusText);
   return r.json();
 }
@@ -93,11 +94,12 @@ export const api = {
 
   // Job-based compute: start, then poll until done. RiverREM's interpolation %
   // is surfaced through onProgress(phase, pct).
-  compute: async (req: ComputeRequest, onProgress?: (phase: string, pct: number) => void) => {
-    const { job_id } = await post<{ job_id: string }>("/compute", req);
+  compute: async (req: ComputeRequest, onProgress?: (phase: string, pct: number) => void, signal?: AbortSignal) => {
+    const { job_id } = await post<{ job_id: string }>("/compute", req, signal);
     for (;;) {
       await sleep(500);
-      const s = await get<JobStatus>(`/compute/${job_id}`);
+      signal?.throwIfAborted();
+      const s = await get<JobStatus>(`/compute/${job_id}`, signal);
       onProgress?.(s.phase, s.pct);
       if (s.status === "done" && s.result) return s.result;
       if (s.status === "error") throw new Error(s.error || "compute failed");

@@ -26,7 +26,7 @@ export const RAMP_NAMES = [
   "mako_r", "blues_r", "gray", "viridis", "spectral", "topo",
   "inferno", "magma", "plasma", "cividis", "turbo", "terrain", "rdbu_r", "set3",
 ] as const;
-export const BASEMAPS = ["dark", "light", "satellite", "hillshade", "none"] as const;
+export const BASEMAPS = ["dark", "light", "satellite", "hillshade", "liberty", "osm-dark", "none"] as const;
 
 export function useMapView() {
   return useQueryStates({
@@ -61,6 +61,8 @@ export function useRemOptions() {
     sliderHi: parseAsFloat, // optional custom slider upper bound (null = auto)
     osm: parseAsString.withDefault("https://qlever.dev/api/osm-planet"),
     qleverMode: parseAsStringEnum(["longest", "all", "waterways"]).withDefault("longest"),
+    polyWater: parseAsBoolean.withDefault(false), // include polygon water areas as open LineStrings
+    qleverGroupBy: parseAsBoolean.withDefault(false), // GROUP BY river name (no geographic clipping, but slower)
     showContours: parseAsBoolean.withDefault(false),
     showContourLabels: parseAsBoolean.withDefault(true),
     showRiver: parseAsBoolean.withDefault(true),

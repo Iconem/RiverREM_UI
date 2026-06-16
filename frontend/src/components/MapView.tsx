@@ -25,6 +25,21 @@ function ensureRemFetchPatch() {
   };
 }
 import type { BBox } from "@/lib/api";
+import ofmLibertyRaw from "@/styles/ofm-liberty.json";
+import osmDarkRaw from "@/styles/osm-dark.json";
+
+// Helper: take a layer list and stamp all layouts with visibility: "none".
+function hideLayers(layers: any[]): any[] {
+  return layers.map((l) => ({ ...l, layout: { ...(l.layout ?? {}), visibility: "none" as const } }));
+}
+
+// OFM Liberty layers merged into the static style, all hidden by default.
+const OFM_LAYERS = hideLayers(ofmLibertyRaw.layers as any[]);
+const OFM_LAYER_IDS = OFM_LAYERS.map((l) => l.id as string);
+
+// OSM Dark layers (fonts already mapped to Noto Sans; reuses the same "openmaptiles" source as Liberty).
+const OSM_DARK_LAYERS = hideLayers(osmDarkRaw.layers as any[]);
+const OSM_DARK_LAYER_IDS = OSM_DARK_LAYERS.map((l) => l.id as string);
 
 // Register the geomatico COG protocol once. For the `cog://…#dem` path we register a
 // custom color function (below) that wins over geomatico's built-in terrain encoder,
@@ -55,7 +70,9 @@ const MAPTERHORN_DEM = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
 
 const STYLE: StyleSpecification = {
   version: 8,
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  // OFM Liberty font server serves the same Noto Sans faces used by contour labels.
+  glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+  sprite: "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
   sources: {
     "carto-dark": {
       type: "raster",
@@ -76,6 +93,8 @@ const STYLE: StyleSpecification = {
       type: "raster-dem", tiles: [MAPTERHORN_DEM], tileSize: 256, maxzoom: 14,
       encoding: "terrarium", attribution: "terrain © Mapterhorn",
     },
+    // OFM Liberty sources (vector tiles + natural-earth raster shading).
+    ...ofmLibertyRaw.sources as any,
   },
   layers: [
     { id: "bg", type: "background", paint: { "background-color": "#0a0a0a" } },
@@ -95,12 +114,18 @@ const STYLE: StyleSpecification = {
         "hillshade-exaggeration": 0.7,
       },
     },
+    // OFM Liberty layers (all hidden by default; shown when base === "liberty").
+    ...OFM_LAYERS,
+    // OSM Dark layers (all hidden by default; shown when base === "osm-dark").
+    ...OSM_DARK_LAYERS,
   ],
 };
 
 const BASE_LAYERS: Record<string, string[]> = {
   dark: ["carto-dark"], light: ["carto-light"], satellite: ["esri-sat"],
   hillshade: ["hs-bg", "mapterhorn-hillshade"],
+  liberty: OFM_LAYER_IDS,
+  "osm-dark": OSM_DARK_LAYER_IDS,
 };
 
 type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number; hillshade: string; transparent: "none" | "white" | "black" };

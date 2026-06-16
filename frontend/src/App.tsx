@@ -318,34 +318,49 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.min, opts.max, opts.log, opts.layer, activeRunId, busy]);
 
+  const previewAbortRef = useRef<AbortController | null>(null);
+
   const onPreview = useCallback(async () => {
+    // Re-click while running → abort
+    if (previewAbortRef.current) {
+      previewAbortRef.current.abort();
+      previewAbortRef.current = null;
+      setBusy(false); setPreviewBusy(false);
+      return;
+    }
     if (!bboxRef.current) return;
+    const ctrl = new AbortController();
+    previewAbortRef.current = ctrl;
     // Clear any loaded layer so the new preview is unambiguous.
     setResult(null); setRiverPoints(null); setActiveRunId(null);
     setOpts({ showContours: false, showSamples: false });
     setBusy(true); setPreviewBusy(true);
     try {
       const bbox = bboxRef.current.bbox;
-      if (opts.qleverMode === "waterways" && opts.osm.includes("qlever")) {
-        const { geojson, count } = await fetchAllWaterways(bbox, opts.osm);
+      const { signal } = ctrl;
+      if (opts.qleverMode === "waterways") {
+        const { geojson, count } = await fetchAllWaterways(bbox, opts.osm, opts.polyWater, signal);
         setCenterline(geojson);
         setCenterInfo({ river_name: `${count} waterways`, river_length_m: 0 });
-      } else if (opts.qleverMode === "all" && opts.osm.includes("qlever")) {
-        const rivers = await fetchAllRivers(bbox, opts.osm);
+      } else if (opts.qleverMode === "all") {
+        const rivers = await fetchAllRivers(bbox, opts.osm, opts.polyWater, opts.qleverGroupBy, signal);
         if (rivers.length === 0) throw new Error("No rivers found");
         const allFeatures = rivers.flatMap((r) => (r.geojson as GeoJSON.FeatureCollection).features);
-        const merged: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: allFeatures };
-        setCenterline(merged);
+        setCenterline({ type: "FeatureCollection", features: allFeatures });
         setCenterInfo({ river_name: `${rivers.length} rivers`, river_length_m: rivers.reduce((s, r) => s + r.length_m, 0) });
       } else {
-        const r = await fetchLongestRiver(bbox, opts.osm);
+        const r = await fetchLongestRiver(bbox, opts.osm, opts.polyWater, opts.qleverGroupBy, signal);
         setCenterline(r.geojson);
         setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
       }
       lastCenterlineFetchRef.current = { bbox, qleverMode: opts.qleverMode };
-    } catch (e) { alert(`No river found: ${(e as Error).message}`); }
-    finally { setBusy(false); setPreviewBusy(false); }
-  }, [opts.osm, opts.qleverMode]);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") alert(`No river found: ${(e as Error).message}`);
+    } finally {
+      previewAbortRef.current = null;
+      setBusy(false); setPreviewBusy(false);
+    }
+  }, [opts.osm, opts.qleverMode, opts.polyWater, opts.qleverGroupBy]);
 
   const onDrawn = useCallback((g: GeoJSON.GeoJSON) => { setCenterline(mergeFeatureCollection(g)); setCenterInfo(null); }, []);
   const onCropToViewport = useCallback(() => {
@@ -480,8 +495,18 @@ export default function App() {
     return id;
   }, [centerInfo, opts.ramp, opts.reverse, opts.transparent, opts.hillshade, opts.base, opts.sliderLo, opts.sliderHi, opts.power, setActiveRem]);
 
+  const computeAbortRef = useRef<AbortController | null>(null);
+
   const onCompute = useCallback(async () => {
     if (!bboxRef.current) return;
+
+    // Re-click while running → abort
+    if (computeAbortRef.current) {
+      computeAbortRef.current.abort();
+      return;
+    }
+    computeAbortRef.current = new AbortController();
+    const signal = computeAbortRef.current.signal;
 
     // ── CLIENT ENGINE: sample the river + build REM tiles live in the browser ──
     if (opts.engine === "client") {
@@ -502,12 +527,19 @@ export default function App() {
             Math.abs(last.bbox.south - bbox.south) < bboxH * 0.2 &&
             Math.abs(last.bbox.north - bbox.north) < bboxH * 0.2;
           if (!cl || !bboxUnchanged || last?.qleverMode !== opts.qleverMode) {
-            if (opts.qleverMode === "waterways" && opts.osm.includes("qlever")) {
-              const { geojson, count } = await fetchAllWaterways(bbox, opts.osm);
+            if (opts.qleverMode === "waterways") {
+              const { geojson, count } = await fetchAllWaterways(bbox, opts.osm, opts.polyWater, signal);
               cl = geojson; setCenterline(geojson);
               setCenterInfo({ river_name: `${count} waterways`, river_length_m: 0 });
+            } else if (opts.qleverMode === "all") {
+              const rivers = await fetchAllRivers(bbox, opts.osm, opts.polyWater, opts.qleverGroupBy, signal);
+              if (rivers.length === 0) throw new Error("No rivers found");
+              const allFeatures = rivers.flatMap((r) => (r.geojson as GeoJSON.FeatureCollection).features);
+              cl = { type: "FeatureCollection", features: allFeatures };
+              setCenterline(cl as GeoJSON.FeatureCollection);
+              setCenterInfo({ river_name: `${rivers.length} rivers`, river_length_m: rivers.reduce((s, r) => s + r.length_m, 0) });
             } else {
-              const r = await fetchLongestRiver(bbox, opts.osm);
+              const r = await fetchLongestRiver(bbox, opts.osm, opts.polyWater, opts.qleverGroupBy, signal);
               const cropped = cropCenterline(r.geojson, bbox, 0.1) ?? r.geojson;
               cl = cropped; setCenterline(cropped);
               setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
@@ -545,8 +577,9 @@ export default function App() {
         const id = await recordClientRun(bounds, pts, remB, maxZ, cl);
         setFitSignal((n) => n + 1);
         captureThumb(id);
-      } catch (e) { alert(`Client compute failed: ${(e as Error).message}`); }
-      finally { setBusy(false); setPhase(""); setPct(0); }
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") alert(`Client compute failed: ${(e as Error).message}`);
+      } finally { computeAbortRef.current = null; setBusy(false); setPhase(""); setPct(0); }
       return;
     }
 
@@ -566,12 +599,19 @@ export default function App() {
           Math.abs(last.bbox.south - bbox.south) < bboxH * 0.2 &&
           Math.abs(last.bbox.north - bbox.north) < bboxH * 0.2;
         if (!cl || !bboxUnchanged || last?.qleverMode !== opts.qleverMode) {
-          if (opts.qleverMode === "waterways" && opts.osm.includes("qlever")) {
-            const { geojson, count } = await fetchAllWaterways(bbox, opts.osm);
+          if (opts.qleverMode === "waterways") {
+            const { geojson, count } = await fetchAllWaterways(bbox, opts.osm, opts.polyWater, signal);
             cl = geojson; setCenterline(geojson);
             setCenterInfo({ river_name: `${count} waterways`, river_length_m: 0 });
+          } else if (opts.qleverMode === "all") {
+            const rivers = await fetchAllRivers(bbox, opts.osm, opts.polyWater, opts.qleverGroupBy, signal);
+            if (rivers.length === 0) throw new Error("No rivers found");
+            const allFeatures = rivers.flatMap((r) => (r.geojson as GeoJSON.FeatureCollection).features);
+            cl = { type: "FeatureCollection", features: allFeatures };
+            setCenterline(cl as GeoJSON.FeatureCollection);
+            setCenterInfo({ river_name: `${rivers.length} rivers`, river_length_m: rivers.reduce((s, r) => s + r.length_m, 0) });
           } else {
-            const r = await fetchLongestRiver(bbox, opts.osm);
+            const r = await fetchLongestRiver(bbox, opts.osm, opts.polyWater, opts.qleverGroupBy, signal);
             const cropped = cropCenterline(r.geojson, bbox, 0.1) ?? r.geojson;
             cl = cropped; setCenterline(cropped);
             setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
@@ -589,7 +629,8 @@ export default function App() {
           source_cog_url: demCogUrl.trim() || null,
           idw_power: opts.power,
         },
-        (ph, p) => { setPhase(ph); setPct(displayPct(ph, p)); }
+        (ph, p) => { setPhase(ph); setPct(displayPct(ph, p)); },
+        signal,
       );
       const remB: Bounds = { min: -1, max: Math.max(1, +(res.rem_max * 0.1).toFixed(2)), log: true };
       const demB: Bounds | null = res.dem_min != null && res.dem_max != null
@@ -602,8 +643,9 @@ export default function App() {
       setServerSynced(true);
       setFitSignal((n) => n + 1);
       captureThumb(id);
-    } catch (e) { alert(`Compute failed: ${(e as Error).message}`); }
-    finally { setBusy(false); setPhase(""); setPct(0); }
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") alert(`Compute failed: ${(e as Error).message}`);
+    } finally { computeAbortRef.current = null; setBusy(false); setPhase(""); setPct(0); }
   }, [opts.res, opts.mode, opts.osm, opts.engine, opts.samples, opts.power, centerline, centerInfo, uploadId, demCogUrl, setOpts, recordRun, recordClientRun, captureThumb]);
 
   const onLoadCog = useCallback(async (url: string) => {
@@ -723,18 +765,15 @@ export default function App() {
       liveAbort.current = new AbortController();
       try {
         let cl: GeoJSON.GeoJSON | null = null;
-        const isBeta = !!OVERPASS_PRESETS.find((pr) => pr.url === opts.osm)?.beta;
-        const useAllWaterways = opts.qleverMode === "waterways" && (opts.osm.includes("qlever") || isBeta);
-        const useAllRivers = opts.qleverMode === "all" && (opts.osm.includes("qlever") || isBeta);
-        if (useAllWaterways) {
-          const { geojson } = await fetchAllWaterways(bbox, opts.osm);
+        if (opts.qleverMode === "waterways") {
+          const { geojson } = await fetchAllWaterways(bbox, opts.osm, opts.polyWater);
           cl = geojson;
-        } else if (useAllRivers) {
-          const rivers = await fetchAllRivers(bbox, opts.osm);
+        } else if (opts.qleverMode === "all") {
+          const rivers = await fetchAllRivers(bbox, opts.osm, opts.polyWater, opts.qleverGroupBy);
           if (rivers.length === 0) return;
           cl = { type: "FeatureCollection", features: rivers.flatMap((r) => (r.geojson as GeoJSON.FeatureCollection).features) };
         } else {
-          const r = await fetchLongestRiver(bbox, opts.osm);
+          const r = await fetchLongestRiver(bbox, opts.osm, opts.polyWater, opts.qleverGroupBy);
           cl = cropCenterline(r.geojson, bbox, 0.1) ?? r.geojson;
         }
         if (!cl) return;
@@ -763,6 +802,15 @@ export default function App() {
       } catch (e) { console.warn("[live]", e); }
     }, 800);
   }, [onBounds, opts.live, opts.engine, opts.qleverMode, opts.osm, opts.samples, opts.power, opts.interp]);
+
+  // Trigger live immediately when live turns on, or when key options change while live is on.
+  // onBoundsWithLive is recreated whenever its deps (live, qleverMode, osm, interp, …) change,
+  // so watching it here fires on all relevant option changes without duplicating the logic.
+  useEffect(() => {
+    if (!opts.live || opts.engine !== "client" || !bboxRef.current) return;
+    onBoundsWithLive(bboxRef.current.bbox, bboxRef.current.zoom);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onBoundsWithLive]);
 
   const onDeleteRun = useCallback((id: string) => { setRuns(removeRun(id)); if (id === activeRunId) setActiveRunId(null); }, [activeRunId]);
   const onRenameRun = useCallback((id: string, name: string) => setRuns(updateRun(id, { name })), []);

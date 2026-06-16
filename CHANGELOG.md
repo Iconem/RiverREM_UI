@@ -7,6 +7,94 @@ sessions, so dates are approximate; the ordering is chronological.
 `0.1.0` is the initial RiverREM Python-backend app. `1.0.0` introduces the pure-frontend
 (client-side JS) REM engine. Anything before `1.0.0` is server-only.
 
+## [1.10.0] — 2026-06-16
+
+### Added
+- **OSM Dark basemap** — the Maptiler OpenStreetMap Dark style adapted to use OpenFreeMap
+  planet tiles (`https://tiles.openfreemap.org/planet`) instead of Maptiler's vector service.
+  The 256 style layers are merged into the static MapLibre style (`src/styles/osm-dark.json`),
+  all hidden by default; selecting "OSM Dark (OFM tiles)" in the Basemap picker shows them.
+  "Open Sans" font references in the original style are replaced with Noto Sans equivalents
+  served by OFM's glyph server. The `openmaptiles` vector source is shared with Liberty.
+
+## [1.9.0] — 2026-06-16
+
+### Added
+- **OpenFreeMap Liberty basemap** — full vector-tile basemap using the OpenFreeMap Liberty
+  style (`https://tiles.openfreemap.org/styles/liberty`). The style's 100+ layers are merged
+  into the static MapLibre style at build time (`src/styles/ofm-liberty.json`), all hidden
+  by default; selecting "Liberty (OpenFreeMap)" in the Basemap picker toggles them visible.
+  OFM Liberty's glyph and sprite servers are used globally (compatible Noto Sans faces,
+  so contour labels are unaffected). The `openmaptiles` and `ne2_shaded` sources are
+  initialized at startup but fetch no tiles until the basemap is activated.
+- **Compute REM abort** — re-clicking the Compute REM button while computing aborts the
+  running job (client engine: interrupts the river-fetch network requests; server engine:
+  stops the polling loop and disconnects the `/compute/:id` fetch). Uses an
+  `AbortController` threaded through `api.compute`, `post`, `get`, and all river fetch
+  helpers. The abort is silent — no error dialog.
+- **Preview abort icon** — spinner with X overlay + "Abort Fetching…" label (previously
+  just an X icon labelled "Abort").
+- **Compute abort icon** — same spinner + X overlay pattern with "Abort Computing…" label.
+  Compute button is no longer `disabled` while busy; a re-click acts as abort.
+- **Live mode immediate trigger** — switching live mode on now triggers an immediate
+  recompute without waiting for a map move. Changing river mode, OSM endpoint, or WSE
+  interpolation while live mode is on also relaunches computation immediately.
+- **WSE tooltip colons** — IDW and EDT interpolation tab tooltips now use `:` instead
+  of `—` as the separator.
+
+## [1.8.0] — 2026-06-16
+
+### Added
+- **Water polygon support** — "Include water areas" toggle for MVT/PMTiles endpoints
+  extracts polygon exterior rings as open LineStrings (closing duplicate coord dropped).
+  Works across all river modes; persisted in URL state (`?polyWater=true`).
+
+### Changed
+- **JFA, EDT, and live mode promoted to general availability** — WSE interpolation tabs
+  and live mode toggle are now visible for all client-engine users, no longer gated on the
+  beta flag.
+- **OSM Vector tiles section label** — "(beta)" suffix removed; the section is now labelled
+  "OSM Vector tiles".
+- **QLever named-rivers query uses GROUP BY** — `fetchQlever` now groups all OSM way
+  segments by river name server-side (`GROUP BY ?name` + `GROUP_CONCAT`) so LIMIT 5000
+  applies to distinct river names rather than individual way segments. Eliminates the
+  west-only clipping visible at zoom ≤ 9 where the old per-segment limit was exhausted
+  in spatial-join order (west first).
+- **QLever all-waterways query limit** — `fetchQleverAll` (used for "all waterways"
+  display-only mode) reduced from 100 000 to 20 000 segments to avoid `unexpected end
+  of JSON input` errors on slow connections; partial coverage at large zoom-out is
+  acceptable for preview.
+
+## [1.7.0] — 2026-06-16
+
+### Added
+- **OSM vector tile river modes respected for all sources** — "All named rivers" and
+  "All waterways" modes now work for MVT and PMTiles endpoints, not only QLever. The
+  routing guards (`osm.includes("qlever") || isBeta`) were removed; `fetchAllRivers`,
+  `fetchAllWaterways`, and `fetchLongestRiver` already dispatch to the correct backend
+  internally, so all four call-sites in App.tsx (onPreview, client compute, server compute,
+  live loop) now branch on `qleverMode` unconditionally.
+- **Preview button label follows river mode for all endpoints** — "Preview longest river" /
+  "Preview named rivers" / "Preview all waterways" was previously only updated when a QLever
+  endpoint was selected; now correct for MVT and PMTiles too.
+- **Water polygon support (MVT/PMTiles)** — "Include water areas" toggle (beta endpoints
+  only) extracts polygon water features from vector tiles as open LineStrings. Exterior
+  rings are projected via `feat.toGeoJSON(x,y,z)` and the closing duplicate coordinate
+  is dropped, producing usable LineString geometry. Threaded through all fetch functions;
+  persisted in URL state (`?polyWater=true`).
+- **OpenFreeMap and Protomaps PMTiles waterways** — added `water` layer to the scan list
+  (Protomaps v4 stores waterway lines in `water` alongside polygon water bodies) and
+  `pmap:kind` to the kind-lookup chain alongside `class`, `kind`, and `waterway`.
+
+### Changed
+- `parseMvtBuffer` now uses `feat.toGeoJSON(x, y, z)` from `@mapbox/vector-tile` for
+  coordinate projection instead of manual tile-space math, removing duplicated logic.
+- `pbf` and `@mapbox/vector-tile` imports replaced with direct named ESM imports
+  (`{ PbfReader }` / `{ VectorTile }`) now that both packages ship native ESM (pbf v5,
+  vector-tile v3). The Vite `optimizeDeps.include` workaround and the IIFE constructor
+  resolver are removed.
+- Verbose `[mvt]` debug logs removed from the hot path now that parsing is stable.
+
 ## [1.6.0] — 2026-06-16
 
 ### Added
