@@ -941,6 +941,11 @@ export function SidePanel(p: {
           (<a className="underline" href="https://github.com/OpenTopography/RiverREM" target="_blank" rel="noreferrer">repo</a>).
         </p>
         <p>
+          <a className="underline" href="https://mapterhorn.com/" target="_blank" rel="noreferrer">
+            Mapterhorn Opendata DEM
+          </a>
+        </p>
+        <p>
           <a className="underline" href="/rem-pure-frontend.html" target="_blank" rel="noreferrer">
             Beta pure-client frontend GPU REM
           </a>
