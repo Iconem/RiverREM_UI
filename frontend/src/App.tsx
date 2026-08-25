@@ -3,7 +3,7 @@ import type { Map as MlMap } from "maplibre-gl";
 import { MapView } from "@/components/MapView";
 import { SidePanel } from "@/components/SidePanel";
 import { useMapView, useRemOptions, useActiveRem, useUiState } from "@/lib/state";
-import { api, cogPath, geocode, reverseGeocode, type BBox, type ComputeResponse, type GeoHit, type GalleryItem } from "@/lib/api";
+import { api, cogPath, geocode, reverseGeocode, CenterlineImportError, type BBox, type CenterlineImportLayer, type ComputeResponse, type DemCapabilities, type DemItem, type GeoHit, type GalleryItem } from "@/lib/api";
 import { fetchLongestRiver, fetchAllRivers, fetchAllWaterways, mergeFeatureCollection, OVERPASS_PRESETS } from "@/lib/osm";
 import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, sampleAt, sampleDemBounds, getRemPerfStats, exportRemCog, exportDemCog, type RiverPoint, type RemPerfStats } from "@/lib/remClient";
 import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
@@ -23,7 +23,8 @@ function downloadUrl(url: string, name: string) {
 // Map backend phase + RiverREM % to a smooth 0–100 (fake ~20%/step, real % in interp).
 function displayPct(phase: string, pct: number): number {
   const m: Record<string, number> = {
-    Queued: 5, "Fetching terrain tiles": 5, "Resolving centerline": 10,
+    Queued: 5, "Resolving centerline": 7, "Checking custom DEM coverage": 9,
+    "Fetching terrain tiles": 10, "Preparing server DEM": 10, "Reading DEM COG": 10,
     "Running RiverREM": 15, "Finding centerline": 20, "Sampling river elevation": 25,
     "Detrending DEM": 90, "Building COG": 95, Done: 100,
   };
@@ -34,6 +35,10 @@ function displayPct(phase: string, pct: number): number {
 // When the requested zoom exceeds Mapterhorn's deepest zoom here, the multiplier is
 // capped (we never upsample past the source). Tell the user the ceiling.
 function resolutionNote(res: ComputeResponse, screenZoom: number, reqMult: number): string | null {
+  if (res.dem_downsampled && res.native_width && res.native_height &&
+      res.processed_dem_width && res.processed_dem_height) {
+    return `This custom DEM viewport was reduced from ${res.native_width.toLocaleString()}×${res.native_height.toLocaleString()} to ${res.processed_dem_width.toLocaleString()}×${res.processed_dem_height.toLocaleString()} pixels to fit the server's processing limit.`;
+  }
   const smz = res.source_max_zoom, rz = res.requested_zoom, dz = res.dem_zoom;
   if (smz == null || rz == null || dz == null) return null;
   // Only relevant when the user asked to oversample (>1×) AND the multiplier was
@@ -43,6 +48,15 @@ function resolutionNote(res: ComputeResponse, screenZoom: number, reqMult: numbe
   const maxMult = headroom >= 2 ? 4 : headroom >= 1 ? 2 : 1;
   return `Mapterhorn's deepest zoom here is z${smz}, so ${reqMult}× was capped to ${maxMult}× (fetched z${dz}). Zoom the map out to oversample further.`;
 }
+
+const DEFAULT_DEM_CAPABILITIES: DemCapabilities = {
+  demSources: {
+    mapterhorn: { enabled: true },
+    url: { enabled: true },
+    upload: { enabled: false, maxBytes: 0, ttlHours: 24, cleanupIntervalMinutes: 15 },
+    library: { enabled: false, label: "Server library" },
+  },
+};
 
 /** Clip a GeoJSON centerline to a bounding box expanded by bufferPct on each side. */
 function cropCenterline(geojson: GeoJSON.GeoJSON | null, bbox: BBox, bufferPct = 0.1): GeoJSON.GeoJSON | null {
@@ -83,6 +97,13 @@ export default function App() {
 
   const [result, setResult] = useState<ComputeResponse | null>(null);
   const [centerline, setCenterline] = useState<GeoJSON.GeoJSON | null>(null);
+  const [centerlineFileName, setCenterlineFileName] = useState<string | null>(null);
+  const [centerlineLayers, setCenterlineLayers] = useState<CenterlineImportLayer[]>([]);
+  const [selectedCenterlineLayerId, setSelectedCenterlineLayerId] = useState("");
+  const [centerlineImportBusy, setCenterlineImportBusy] = useState(false);
+  const [centerlineCrsRequired, setCenterlineCrsRequired] = useState(false);
+  const [centerlineInputCrs, setCenterlineInputCrs] = useState("");
+  const [pendingCenterlineFile, setPendingCenterlineFile] = useState<File | null>(null);
   const [centerInfo, setCenterInfo] = useState<{ river_name: string; river_length_m: number } | null>(null);
   const [uploadId, setUploadId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -145,9 +166,54 @@ export default function App() {
   const [fps, setFps] = useState<number | null>(null);
   const [remPerf, setRemPerf] = useState<RemPerfStats | null>(null);
   const [demCogUrl, setDemCogUrl] = useState(""); // optional DEM COG for the server engine
+  const [demCapabilities, setDemCapabilities] = useState<DemCapabilities>(DEFAULT_DEM_CAPABILITIES);
+  const [demSourceMode, setDemSourceMode] = useState<"mapterhorn" | "url" | "upload" | "library">("mapterhorn");
+  const [uploadedDem, setUploadedDem] = useState<DemItem | null>(null);
+  const [demUploadBusy, setDemUploadBusy] = useState(false);
+  const [demUploadProgress, setDemUploadProgress] = useState(0);
+  const [demLibrary, setDemLibrary] = useState<DemItem[]>([]);
+  const [libraryDemRef, setLibraryDemRef] = useState("");
   const [clientMaxZoom, setClientMaxZoom] = useState(14); // probed deepest Mapterhorn zoom (client engine)
   const [previewBusy, setPreviewBusy] = useState(false);
   const [serverRunsLoading, setServerRunsLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.capabilities().then(async (capabilities) => {
+      if (cancelled) return;
+      setDemCapabilities(capabilities);
+      if (capabilities.demSources.library.enabled) {
+        try {
+          const { items } = await api.demLibrary();
+          if (!cancelled) setDemLibrary(items);
+        } catch { if (!cancelled) setDemLibrary([]); }
+      }
+    }).catch(() => {
+      // Older backends do not expose capabilities. Preserve their Mapterhorn/URL UI.
+      if (!cancelled) setDemCapabilities(DEFAULT_DEM_CAPABILITIES);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const onUploadDem = useCallback(async (file: File) => {
+    if (!demCapabilities.demSources.upload.enabled) return;
+    if (!file.name.toLowerCase().endsWith(".tif") && !file.name.toLowerCase().endsWith(".tiff")) {
+      alert("Select a .tif or .tiff DEM file.");
+      return;
+    }
+    if (file.size > demCapabilities.demSources.upload.maxBytes) {
+      alert("This DEM is larger than the server's configured upload limit.");
+      return;
+    }
+    setDemUploadBusy(true); setDemUploadProgress(0); setUploadedDem(null);
+    try {
+      const initialized = await api.initDemUpload(file);
+      const item = await api.uploadDem(initialized.uploadId, file, setDemUploadProgress);
+      setUploadedDem(item); setDemUploadProgress(100);
+    } catch (error) {
+      alert(`DEM upload failed: ${(error as Error).message}`);
+    } finally { setDemUploadBusy(false); }
+  }, [demCapabilities]);
 
   const bboxRef = useRef<{ bbox: BBox; zoom: number } | null>(null);
   const resultRef = useRef<ComputeResponse | null>(null);
@@ -353,6 +419,11 @@ export default function App() {
         setCenterline(r.geojson);
         setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
       }
+      setCenterlineFileName(null);
+      setCenterlineLayers([]);
+      setSelectedCenterlineLayerId("");
+      setCenterlineCrsRequired(false);
+      setPendingCenterlineFile(null);
       lastCenterlineFetchRef.current = { bbox, qleverMode: opts.qleverMode };
     } catch (e) {
       if ((e as Error).name !== "AbortError") alert(`No river found: ${(e as Error).message}`);
@@ -362,88 +433,101 @@ export default function App() {
     }
   }, [opts.osm, opts.qleverMode, opts.polyWater, opts.qleverGroupBy]);
 
-  const onDrawn = useCallback((g: GeoJSON.GeoJSON) => { setCenterline(mergeFeatureCollection(g)); setCenterInfo(null); }, []);
+  const onDrawn = useCallback((g: GeoJSON.GeoJSON) => {
+    setCenterline(mergeFeatureCollection(g));
+    setCenterlineFileName(null);
+    setCenterlineLayers([]);
+    setSelectedCenterlineLayerId("");
+    setCenterlineCrsRequired(false);
+    setPendingCenterlineFile(null);
+    setCenterInfo(null);
+  }, []);
   const onCropToViewport = useCallback(() => {
     if (!bboxRef.current || !centerline) return;
     const cropped = cropCenterline(centerline, bboxRef.current.bbox, 0.1);
     if (cropped) setCenterline(cropped);
   }, [centerline]);
 
-  const onImport = useCallback(async (f: File) => {
-    setBusy(true);
-    try {
-      const text = await f.text();
-      console.log("[import] raw text length:", text.length, "file:", f.name);
-      const parsed = JSON.parse(text) as GeoJSON.GeoJSON;
-      console.log("[import] parsed type:", parsed.type);
-
-      const fc: GeoJSON.FeatureCollection =
-        parsed.type === "FeatureCollection" ? parsed :
-        parsed.type === "Feature" ? { type: "FeatureCollection", features: [parsed as GeoJSON.Feature] } :
-        { type: "FeatureCollection", features: [] };
-
-      const lineFeatures = fc.features.filter(
-        (f) => f.geometry?.type === "LineString" || f.geometry?.type === "MultiLineString",
-      );
-      console.log("[import] total features:", fc.features.length, "| line features:", lineFeatures.length,
-        lineFeatures.map((f) => `${f.geometry.type}(${f.geometry.type === "LineString" ? (f.geometry as GeoJSON.LineString).coordinates.length : "multi"} pts)`));
-
-      // Collect all coordinates for bbox calculation.
-      const coords: number[][] = [];
-      for (const feat of lineFeatures) {
-        const g = feat.geometry;
-        if (g.type === "LineString") coords.push(...g.coordinates);
-        else if (g.type === "MultiLineString") for (const ls of g.coordinates) coords.push(...ls);
-      }
-
-      // Load into terra-draw so it owns the geometry and draws it on the map.
-      // Falls back to plain preview-line if terra-draw is not yet ready.
-      const draw = terradrawRef.current;
-      if (draw) {
-        try {
-          draw.clear();
-          const tdFeatures = lineFeatures.map((feat) => ({
-            ...feat,
-            id: crypto.randomUUID(),
-            properties: { ...(feat.properties ?? {}), mode: "linestring" },
-          }));
-          const results = draw.addFeatures(tdFeatures);
-          console.log("[import] terra-draw addFeatures results:", results);
-          const snapshot: GeoJSON.Feature[] = draw.getSnapshot();
-          console.log("[import] terra-draw snapshot after add:", snapshot.length, "features");
-          const importedFc: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: snapshot };
-          setCenterline(importedFc);
-        } catch (err) {
-          console.warn("[import] terra-draw addFeatures failed, falling back to plain preview:", err);
-          setCenterline(fc);
-        }
-      } else {
-        console.warn("[import] terra-draw not ready, using plain preview-line");
-        setCenterline(fc);
-      }
-
-      setUploadId(null);
-      setCenterInfo(null);
-      setOpts({ mode: "geojson" });
-
-      // Fit map to the imported geometry.
-      if (coords.length > 0 && mapRef.current) {
-        const lngs = coords.map((c) => c[0]);
-        const lats = coords.map((c) => c[1]);
-        const bounds: [number, number, number, number] = [
-          Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats),
-        ];
-        console.log("[import] fitting map to bounds:", bounds);
-        mapRef.current.fitBounds(bounds, { padding: 60, duration: 600, maxZoom: 14 });
-      } else {
-        console.warn("[import] no coordinates found for fitBounds");
-      }
-    } catch (e) {
-      console.error("[import] failed:", e);
-      alert(`Import failed: ${(e as Error).message}`);
+  const applyImportedLayer = useCallback((layer: CenterlineImportLayer, filename: string) => {
+    const lineFeatures = layer.geojson.features.filter(
+      (feature) => feature.geometry?.type === "LineString" || feature.geometry?.type === "MultiLineString",
+    );
+    const importedFc: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: lineFeatures };
+    const coords: number[][] = [];
+    for (const feature of lineFeatures) {
+      const geometry = feature.geometry;
+      if (geometry.type === "LineString") coords.push(...geometry.coordinates);
+      else if (geometry.type === "MultiLineString") for (const line of geometry.coordinates) coords.push(...line);
     }
-    finally { setBusy(false); }
+
+    // TerraDraw may adopt the normalized WGS84 features for editing, but the
+    // returned GeoJSON remains authoritative for preview and computation.
+    const draw = terradrawRef.current;
+    if (draw) {
+      try {
+        draw.clear();
+        draw.addFeatures(lineFeatures.map((feature) => ({
+          ...feature,
+          id: crypto.randomUUID(),
+          properties: { ...(feature.properties ?? {}), mode: "linestring" },
+        })));
+      } catch (error) {
+        console.warn("[import] TerraDraw could not adopt imported features; using preview layer:", error);
+      }
+    }
+
+    setCenterline(importedFc);
+    setCenterlineFileName(filename);
+    setSelectedCenterlineLayerId(layer.id);
+    setUploadId(null);
+    setCenterInfo(null);
+    setResult(null); setRiverPoints(null); setActiveRunId(null);
+    setOpts({ mode: "geojson", showContours: false, showSamples: false });
+
+    if (coords.length > 0 && mapRef.current) {
+      const lngs = coords.map((coordinate) => coordinate[0]);
+      const lats = coords.map((coordinate) => coordinate[1]);
+      mapRef.current.fitBounds(
+        [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)],
+        { padding: 60, duration: 600, maxZoom: 14 },
+      );
+    }
   }, [setOpts]);
+
+  const onImport = useCallback(async (file: File, inputCrs?: string) => {
+    setCenterlineImportBusy(true);
+    setCenterlineCrsRequired(false);
+    setPendingCenterlineFile(file);
+    try {
+      const imported = await api.importCenterline(file, inputCrs);
+      if (imported.layers.length === 0) throw new Error("No line layers were found.");
+      setCenterlineLayers(imported.layers);
+      setCenterlineInputCrs("");
+      setPendingCenterlineFile(null);
+      applyImportedLayer(imported.layers[0], imported.filename);
+    } catch (error) {
+      if (error instanceof CenterlineImportError && error.code === "crs_required") {
+        setCenterlineCrsRequired(true);
+      } else {
+        console.error("[import] failed:", error);
+        setPendingCenterlineFile(null);
+        alert(`Import failed: ${(error as Error).message}`);
+      }
+    } finally {
+      setCenterlineImportBusy(false);
+    }
+  }, [applyImportedLayer]);
+
+  const onSelectCenterlineLayer = useCallback((layerId: string) => {
+    const layer = centerlineLayers.find((candidate) => candidate.id === layerId);
+    if (layer && centerlineFileName) applyImportedLayer(layer, centerlineFileName);
+  }, [applyImportedLayer, centerlineFileName, centerlineLayers]);
+
+  const onApplyCenterlineCrs = useCallback(() => {
+    if (pendingCenterlineFile && centerlineInputCrs.trim()) {
+      void onImport(pendingCenterlineFile, centerlineInputCrs);
+    }
+  }, [centerlineInputCrs, onImport, pendingCenterlineFile]);
 
   const recordRun = useCallback(async (res: ComputeResponse, remB: Bounds, demB: Bounds | null) => {
     setActiveRem({ cog: res.cog_url, dem: res.dem_url || "", bounds: res.bounds });
@@ -500,6 +584,14 @@ export default function App() {
   const onCompute = useCallback(async () => {
     if (!bboxRef.current) return;
 
+    const selectedDemRef = demSourceMode === "upload" ? uploadedDem?.ref
+      : demSourceMode === "library" ? libraryDemRef
+      : null;
+    if (opts.engine === "server" && (demSourceMode === "upload" || demSourceMode === "library") && !selectedDemRef) {
+      alert(demSourceMode === "upload" ? "Upload a DEM before computing." : "Select a DEM from the server library.");
+      return;
+    }
+
     // Re-click while running → abort
     if (computeAbortRef.current) {
       computeAbortRef.current.abort();
@@ -516,7 +608,7 @@ export default function App() {
       setBusy(true); setRemVisible(true); setResNote(null); setPhase("Finding river"); setPct(10);
       try {
         let cl = centerline;
-        if (opts.mode !== "shapefile") {
+        if (opts.mode === "osm") {
           const bbox = bboxRef.current.bbox;
           const last = lastCenterlineFetchRef.current;
           const bboxW = Math.abs(bbox.east - bbox.west);
@@ -545,7 +637,10 @@ export default function App() {
               setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
             }
             lastCenterlineFetchRef.current = { bbox, qleverMode: opts.qleverMode };
+            setCenterlineFileName(null); setCenterlineLayers([]); setSelectedCenterlineLayerId("");
           }
+        } else if (opts.mode === "geojson" && !cl) {
+          throw new Error("Draw or upload a centerline before computing.");
         }
         setPhase("Sampling river"); setPct(45);
         const z = bboxRef.current.zoom;
@@ -588,7 +683,7 @@ export default function App() {
     setBusy(true); setRemVisible(true); setResNote(null); setPhase("Finding river"); setPct(8);
     try {
       let cl = centerline;
-      if (opts.mode !== "shapefile") {
+      if (opts.mode === "osm") {
         const bbox = bboxRef.current.bbox;
         const last = lastCenterlineFetchRef.current;
         const bboxW = Math.abs(bbox.east - bbox.west);
@@ -617,7 +712,10 @@ export default function App() {
             setCenterInfo({ river_name: r.name, river_length_m: r.length_m });
           }
           lastCenterlineFetchRef.current = { bbox, qleverMode: opts.qleverMode };
+          setCenterlineFileName(null); setCenterlineLayers([]); setSelectedCenterlineLayerId("");
         }
+      } else if (opts.mode === "geojson" && !cl) {
+        throw new Error("Draw or upload a centerline before computing.");
       }
       const usingShp = opts.mode === "shapefile" && uploadId;
       const res = await api.compute(
@@ -626,7 +724,8 @@ export default function App() {
           resolution_multiplier: opts.res as 1 | 2 | 4,
           centerline_mode: usingShp ? "shapefile" : "geojson",
           centerline_geojson: usingShp ? null : cl, upload_id: usingShp ? uploadId : null,
-          source_cog_url: demCogUrl.trim() || null,
+          source_cog_url: demSourceMode === "url" ? demCogUrl.trim() || null : null,
+          source_dem_ref: selectedDemRef,
           idw_power: opts.power,
         },
         (ph, p) => { setPhase(ph); setPct(displayPct(ph, p)); },
@@ -646,7 +745,7 @@ export default function App() {
     } catch (e) {
       if ((e as Error).name !== "AbortError") alert(`Compute failed: ${(e as Error).message}`);
     } finally { computeAbortRef.current = null; setBusy(false); setPhase(""); setPct(0); }
-  }, [opts.res, opts.mode, opts.osm, opts.engine, opts.samples, opts.power, centerline, centerInfo, uploadId, demCogUrl, setOpts, recordRun, recordClientRun, captureThumb]);
+  }, [opts.res, opts.mode, opts.osm, opts.engine, opts.samples, opts.power, centerline, centerInfo, uploadId, demCogUrl, demSourceMode, uploadedDem, libraryDemRef, setOpts, recordRun, recordClientRun, captureThumb]);
 
   const onLoadCog = useCallback(async (url: string) => {
     setBusy(true); setRemVisible(true); setPhase("Reprojecting COG"); setPct(40);
@@ -758,7 +857,7 @@ export default function App() {
   const liveAbort = useRef<AbortController | null>(null);
   const onBoundsWithLive = useCallback((bbox: import("@/lib/api").BBox, zoom: number) => {
     onBounds(bbox, zoom);
-    if (!opts.live || opts.engine !== "client") return;
+    if (!opts.live || opts.engine !== "client" || opts.mode !== "osm") return;
     if (liveTimer.current) clearTimeout(liveTimer.current);
     liveTimer.current = setTimeout(async () => {
       liveAbort.current?.abort();
@@ -779,6 +878,7 @@ export default function App() {
         if (!cl) return;
         setCenterline(cl);
         lastCenterlineFetchRef.current = { bbox, qleverMode: opts.qleverMode };
+        setCenterlineFileName(null); setCenterlineLayers([]); setSelectedCenterlineLayerId("");
         // Set result immediately so riverGeojson is non-null before any await boundary.
         const wasFirstActivation = !resultRef.current;
         const liveResult: import("@/lib/api").ComputeResponse = {
@@ -801,13 +901,13 @@ export default function App() {
         setRemToken((n) => n + 1);
       } catch (e) { console.warn("[live]", e); }
     }, 800);
-  }, [onBounds, opts.live, opts.engine, opts.qleverMode, opts.osm, opts.samples, opts.power, opts.interp]);
+  }, [onBounds, opts.live, opts.engine, opts.mode, opts.qleverMode, opts.osm, opts.samples, opts.power, opts.interp]);
 
   // Trigger live immediately when live turns on, or when key options change while live is on.
   // onBoundsWithLive is recreated whenever its deps (live, qleverMode, osm, interp, …) change,
   // so watching it here fires on all relevant option changes without duplicating the logic.
   useEffect(() => {
-    if (!opts.live || opts.engine !== "client" || !bboxRef.current) return;
+    if (!opts.live || opts.engine !== "client" || opts.mode !== "osm" || !bboxRef.current) return;
     onBoundsWithLive(bboxRef.current.bbox, bboxRef.current.zoom);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onBoundsWithLive]);
@@ -950,6 +1050,15 @@ export default function App() {
           hasDem={!!result?.dem_url}
           onSetLayer={onSetLayer}
           hasCenterline={!!centerline}
+          centerlineFileName={centerlineFileName}
+          centerlineLayers={centerlineLayers}
+          selectedCenterlineLayerId={selectedCenterlineLayerId}
+          centerlineImportBusy={centerlineImportBusy}
+          centerlineCrsRequired={centerlineCrsRequired}
+          centerlineInputCrs={centerlineInputCrs}
+          setCenterlineInputCrs={setCenterlineInputCrs}
+          onSelectCenterlineLayer={onSelectCenterlineLayer}
+          onApplyCenterlineCrs={onApplyCenterlineCrs}
           previewInfo={centerInfo}
           runs={runs}
           serverRuns={serverRuns}
@@ -965,6 +1074,16 @@ export default function App() {
           onLoadCog={onLoadCog}
           demCogUrl={demCogUrl}
           setDemCogUrl={setDemCogUrl}
+          demCapabilities={demCapabilities}
+          demSourceMode={demSourceMode}
+          setDemSourceMode={setDemSourceMode}
+          uploadedDem={uploadedDem}
+          demUploadBusy={demUploadBusy}
+          demUploadProgress={demUploadProgress}
+          onUploadDem={onUploadDem}
+          demLibrary={demLibrary}
+          libraryDemRef={libraryDemRef}
+          setLibraryDemRef={setLibraryDemRef}
           onShare={onShare}
           onExportComposite={onExportComposite}
           onCopyImage={onCopyImage}

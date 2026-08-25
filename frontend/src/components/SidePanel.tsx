@@ -17,7 +17,7 @@ import { rampCss } from "@/lib/colormap";
 import { RAMP_NAMES, useUiState } from "@/lib/state";
 import { OVERPASS_PRESETS } from "@/lib/osm";
 import type { Run } from "@/lib/history";
-import type { ComputeResponse, GeoHit } from "@/lib/api";
+import type { CenterlineImportLayer, ComputeResponse, DemCapabilities, DemItem, GeoHit } from "@/lib/api";
 
 type Opts = {
   mode: "osm" | "geojson" | "shapefile";
@@ -71,11 +71,23 @@ function Progress({ active, label, pct }: { active: boolean; label: string; pct:
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024, unit = units[0];
+  for (let i = 1; i < units.length && value >= 1024; i++) { value /= 1024; unit = units[i]; }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
+}
+
 export function SidePanel(p: {
   opts: Opts; setOpts: (o: Partial<Opts>) => void;
   busy: boolean; phase: string; pct: number;
   resNote: string | null;
-  result: ComputeResponse | null; hasCenterline: boolean;
+  result: ComputeResponse | null; hasCenterline: boolean; centerlineFileName: string | null;
+  centerlineLayers: CenterlineImportLayer[]; selectedCenterlineLayerId: string;
+  centerlineImportBusy: boolean; centerlineCrsRequired: boolean; centerlineInputCrs: string;
+  setCenterlineInputCrs: (value: string) => void; onSelectCenterlineLayer: (layerId: string) => void;
+  onApplyCenterlineCrs: () => void;
   layer: "rem" | "dem"; hasDem: boolean; onSetLayer: (l: "rem" | "dem") => void;
   previewInfo: { river_name: string; river_length_m: number } | null;
   runs: Run[]; serverRuns: Run[]; activeRunId: string | null; remVisible: boolean; pickMode: boolean;
@@ -83,6 +95,12 @@ export function SidePanel(p: {
   geoHits: GeoHit[];
   onPreview: () => void; onCompute: () => void; onUpload: (f: File) => void; onLoadCog: (url: string) => void;
   demCogUrl: string; setDemCogUrl: (v: string) => void;
+  demCapabilities: DemCapabilities;
+  demSourceMode: "mapterhorn" | "url" | "upload" | "library";
+  setDemSourceMode: (v: "mapterhorn" | "url" | "upload" | "library") => void;
+  uploadedDem: DemItem | null; demUploadBusy: boolean; demUploadProgress: number;
+  onUploadDem: (f: File) => void;
+  demLibrary: DemItem[]; libraryDemRef: string; setLibraryDemRef: (v: string) => void;
   onShare: () => void; onExportComposite: () => void; onCopyImage: () => void;
   onExportRaw: () => void; onExportDem: () => void; onExportCenterline: () => void;
   onExportClientCog?: (zoom: number) => Promise<void>;
@@ -103,11 +121,15 @@ export function SidePanel(p: {
   const { opts, setOpts, busy, result } = p;
   const [ui, setUi] = useUiState();
   const fileRef = useRef<HTMLInputElement>(null);
+  const demFileRef = useRef<HTMLInputElement>(null);
   const [cogUrl, setCogUrl] = useState("");
   const [copied, setCopied] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [geoQ, setGeoQ] = useState("");
+  const selectedCenterlineLayer = p.centerlineLayers.find(
+    (layer) => layer.id === p.selectedCenterlineLayerId,
+  ) ?? p.centerlineLayers[0] ?? null;
 
   // Min/Max use local text state so partial input like "-" or "-12." is typable;
   // committed (parsed + clamped) on blur / Enter.
@@ -144,6 +166,10 @@ export function SidePanel(p: {
 
   const share = () => { p.onShare(); setCopied(true); setTimeout(() => setCopied(false), 3000); };
   const flipLayer = () => p.onSetLayer(p.layer === "rem" ? "dem" : "rem");
+  const demReady = p.demSourceMode === "mapterhorn"
+    || (p.demSourceMode === "url" && !!p.demCogUrl.trim())
+    || (p.demSourceMode === "upload" && !!p.uploadedDem && !p.demUploadBusy)
+    || (p.demSourceMode === "library" && !!p.libraryDemRef);
 
   const cardBase =
     `pointer-events-auto absolute left-4 top-4 z-50 w-[360px] shadow-2xl backdrop-blur ${
@@ -281,10 +307,52 @@ export function SidePanel(p: {
           {opts.mode === "geojson" && (
             <>
               <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">Click on the map to draw a centerline. Double-click to finish, or upload a file.</p>
-              <Button variant="outline" size="sm" className="w-full" onClick={() => fileRef.current?.click()}>Upload .geojson</Button>
+              <Button variant="outline" size="sm" className="w-full gap-1" disabled={p.centerlineImportBusy}
+                onClick={() => fileRef.current?.click()}>
+                {p.centerlineImportBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                {p.centerlineImportBusy ? "Importing centerline…" : "Upload Centerline File"}
+              </Button>
+              <p className="font-mono text-[9px] leading-relaxed text-muted-foreground">
+                Accepted: .geojson (EPSG:4326), .gpkg, .zip Shapefile
+              </p>
+              {p.centerlineCrsRequired && (
+                <div className="space-y-1.5 rounded-md border border-amber-500/40 p-2">
+                  <p className="font-mono text-[10px] leading-relaxed text-amber-500">CRS metadata is missing. Enter the source CRS.</p>
+                  <div className="flex gap-1.5">
+                    <Input className="h-7 text-xs" value={p.centerlineInputCrs}
+                      onChange={(event) => p.setCenterlineInputCrs(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === "Enter") p.onApplyCenterlineCrs(); }}
+                      placeholder="EPSG:6344" aria-label="Centerline input CRS" />
+                    <Button variant="outline" size="sm" className="h-7 shrink-0" disabled={!p.centerlineInputCrs.trim() || p.centerlineImportBusy}
+                      onClick={p.onApplyCenterlineCrs}>Apply CRS</Button>
+                  </div>
+                </div>
+              )}
+              {p.centerlineFileName && selectedCenterlineLayer && !p.centerlineCrsRequired && (
+                <div className="space-y-1.5">
+                  <p className="flex min-w-0 items-center font-mono text-[10px] leading-relaxed text-muted-foreground" title={p.centerlineFileName}>
+                    <Check className="mr-1 h-3 w-3 shrink-0 text-emerald-500" />
+                    <span className="truncate">{p.centerlineFileName}</span>
+                  </p>
+                  {p.centerlineLayers.length > 1 && (
+                    <Select value={p.selectedCenterlineLayerId} onValueChange={p.onSelectCenterlineLayer}>
+                      <SelectTrigger className="h-7 text-xs" aria-label="Centerline layer"><SelectValue /></SelectTrigger>
+                      <SelectContent>{p.centerlineLayers.map((layer) => (
+                        <SelectItem key={layer.id} value={layer.id}>{layer.name}</SelectItem>
+                      ))}</SelectContent>
+                    </Select>
+                  )}
+                  <p className="font-mono text-[9px] leading-relaxed text-muted-foreground">
+                    {selectedCenterlineLayer.crs} · {selectedCenterlineLayer.featureCount} line{selectedCenterlineLayer.featureCount === 1 ? "" : "s"} · {selectedCenterlineLayer.vertexCount.toLocaleString()} points · {(selectedCenterlineLayer.lengthM / 1000).toFixed(1)} km
+                  </p>
+                  {selectedCenterlineLayer.warnings.map((warning) => (
+                    <p key={warning} className="font-mono text-[9px] leading-relaxed text-amber-500">{warning}</p>
+                  ))}
+                </div>
+              )}
             </>
           )}
-          <input ref={fileRef} type="file" accept=".geojson,.json" className="hidden"
+          <input ref={fileRef} type="file" accept=".geojson,.json,.gpkg,.zip" className="hidden"
             onClick={(e) => { (e.target as HTMLInputElement).value = ""; }}
             onChange={(e) => e.target.files?.[0] && p.onUpload(e.target.files[0])} />
           {p.previewInfo && (
@@ -379,13 +447,62 @@ export function SidePanel(p: {
               Experimental — REM built live in the browser (Mapterhorn DEM, {opts.interp === "jfa" ? "nearest-polyline WSE" : opts.interp === "edt" ? "EDT WSE" : "IDW"}), no server compute.
             </p>
           ) : (
-            <div className="space-y-1">
-              <Label>Custom DEM COG (optional)</Label>
-              <Input className="text-xs" value={p.demCogUrl} onChange={(e) => p.setDemCogUrl(e.target.value)} placeholder="https://…/dem.tif — overrides Mapterhorn" />
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <Label>DEM source</Label>
+                <Select value={p.demSourceMode} onValueChange={(value) => p.setDemSourceMode(value as typeof p.demSourceMode)}>
+                  <SelectTrigger className="text-xs" aria-label="DEM source"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mapterhorn">Mapterhorn</SelectItem>
+                    {p.demCapabilities.demSources.url.enabled && <SelectItem value="url">COG URL</SelectItem>}
+                    {p.demCapabilities.demSources.upload.enabled && <SelectItem value="upload">Upload local DEM</SelectItem>}
+                    {p.demCapabilities.demSources.library.enabled && <SelectItem value="library">{p.demCapabilities.demSources.library.label}</SelectItem>}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {p.demSourceMode === "url" && (
+                <Input className="text-xs" aria-label="DEM COG URL" value={p.demCogUrl} onChange={(e) => p.setDemCogUrl(e.target.value)} placeholder="https://…/dem.tif" />
+              )}
+
+              {p.demSourceMode === "upload" && (
+                <div className="space-y-2">
+                  <input ref={demFileRef} type="file" className="hidden" accept=".tif,.tiff,image/tiff"
+                    onChange={(event) => { const file = event.target.files?.[0]; if (file) p.onUploadDem(file); event.target.value = ""; }} />
+                  <Button type="button" variant="outline" className="w-full" disabled={p.demUploadBusy}
+                    onClick={() => demFileRef.current?.click()}>
+                    {p.demUploadBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {p.uploadedDem ? "Choose another DEM" : "Choose local .tif"}
+                  </Button>
+                  <Progress active={p.demUploadBusy} label="Uploading DEM" pct={p.demUploadProgress} />
+                  {p.uploadedDem && !p.demUploadBusy && (
+                    <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">
+                      <Check className="mr-1 inline h-3 w-3" />{p.uploadedDem.name} · {formatBytes(p.uploadedDem.sizeBytes)} · {p.uploadedDem.width}×{p.uploadedDem.height}
+                    </p>
+                  )}
+                  <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">
+                    Streamed to this server; automatically deleted within {p.demCapabilities.demSources.upload.cleanupIntervalMinutes ?? 15} min after {p.demCapabilities.demSources.upload.ttlHours}h. Limit {formatBytes(p.demCapabilities.demSources.upload.maxBytes)}.
+                  </p>
+                </div>
+              )}
+
+              {p.demSourceMode === "library" && (
+                <div className="space-y-1">
+                  {p.demLibrary.length ? (
+                    <Select value={p.libraryDemRef} onValueChange={p.setLibraryDemRef}>
+                      <SelectTrigger className="text-xs" aria-label="Server DEM"><SelectValue placeholder="Select a server DEM…" /></SelectTrigger>
+                      <SelectContent>{p.demLibrary.map((item) => (
+                        <SelectItem key={item.ref} value={item.ref}>{item.name} · {formatBytes(item.sizeBytes)}</SelectItem>
+                      ))}</SelectContent>
+                    </Select>
+                  ) : <p className="font-mono text-[10px] text-muted-foreground">No valid GeoTIFFs are available in the server library.</p>}
+                </div>
+              )}
             </div>
           )}
 
-          <Button className="h-10 w-full" onClick={p.onCompute}>
+          <Button className="h-10 w-full" onClick={p.onCompute}
+            disabled={!busy && opts.engine === "server" && (!demReady || p.demUploadBusy)}>
             {busy ? <span className="relative inline-flex h-4 w-4 shrink-0"><Loader2 className="h-4 w-4 animate-spin" /><X className="absolute inset-0 m-auto h-2.5 w-2.5" /></span> : <Play className="h-4 w-4" />}
             {busy ? "Abort Computing…" : "Compute REM"}
           </Button>

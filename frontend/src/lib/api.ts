@@ -10,6 +10,7 @@ export type ComputeRequest = {
   centerline_geojson?: GeoJSON.GeoJSON | null;
   upload_id?: string | null;
   source_cog_url?: string | null;
+  source_dem_ref?: string | null;
   idw_power?: number;
   interp_pts?: number;
   k?: number | null;
@@ -51,6 +52,11 @@ export type ComputeResponse = {
   source_max_zoom?: number | null;
   dem_zoom?: number | null;
   requested_zoom?: number | null;
+  dem_downsampled?: boolean;
+  native_width?: number | null;
+  native_height?: number | null;
+  processed_dem_width?: number | null;
+  processed_dem_height?: number | null;
 };
 
 export type JobStatus = {
@@ -59,6 +65,55 @@ export type JobStatus = {
   pct: number;
   result?: ComputeResponse;
   error?: string;
+};
+
+export type DemCapabilities = {
+  demSources: {
+    mapterhorn: { enabled: boolean };
+    url: { enabled: boolean };
+    upload: { enabled: boolean; maxBytes: number; ttlHours: number; cleanupIntervalMinutes?: number };
+    library: { enabled: boolean; label: string };
+  };
+};
+
+export type DemItem = {
+  ref: string;
+  name: string;
+  sizeBytes: number;
+  width: number;
+  height: number;
+  bounds: [number, number, number, number];
+  crs?: string | null;
+};
+
+export type CenterlineImportLayer = {
+  id: string;
+  name: string;
+  crs: string;
+  featureCount: number;
+  vertexCount: number;
+  lengthM: number;
+  warnings: string[];
+  geojson: GeoJSON.FeatureCollection;
+};
+
+export type CenterlineImportResult = {
+  filename: string;
+  layers: CenterlineImportLayer[];
+};
+
+export class CenterlineImportError extends Error {
+  constructor(message: string, public code?: string) {
+    super(message);
+    this.name = "CenterlineImportError";
+  }
+}
+
+export type DemUploadInit = {
+  uploadId: string;
+  ref: string;
+  filename: string;
+  sizeBytes: number;
 };
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -86,11 +141,52 @@ export function cogPath(url: string): string | null {
 }
 
 export const api = {
+  capabilities: () => get<DemCapabilities>("/capabilities"),
+
+  demLibrary: () => get<{ items: DemItem[] }>("/dem/library"),
+
+  initDemUpload: (file: File) =>
+    post<DemUploadInit>("/dem/uploads", { filename: file.name, size_bytes: file.size }),
+
+  uploadDem: (uploadId: string, file: File, onProgress?: (pct: number) => void) =>
+    new Promise<DemItem>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", `${BASE}/dem/uploads/${encodeURIComponent(uploadId)}`);
+      xhr.setRequestHeader("Content-Type", "image/tiff");
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
+      };
+      xhr.onerror = () => reject(new Error("The DEM upload was interrupted"));
+      xhr.onabort = () => reject(new DOMException("Upload aborted", "AbortError"));
+      xhr.onload = () => {
+        let body: any = null;
+        try { body = JSON.parse(xhr.responseText); } catch { /* non-JSON proxy error */ }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body as DemItem);
+        else reject(new Error(body?.detail ?? xhr.statusText ?? "DEM upload failed"));
+      };
+      xhr.send(file);
+    }),
+
   centerlineOsm: (req: Partial<ComputeRequest> & { bbox: BBox; zoom: number }) =>
     post<{ geojson: GeoJSON.GeoJSON; river_name: string; river_length_m: number }>(
       "/centerline/osm",
       { centerline_mode: "osm", resolution_multiplier: 1, ...req }
     ),
+
+  importCenterline: async (file: File, inputCrs?: string): Promise<CenterlineImportResult> => {
+    const form = new FormData();
+    form.append("file", file);
+    if (inputCrs?.trim()) form.append("input_crs", inputCrs.trim());
+    const response = await fetch(`${BASE}/centerline/import`, { method: "POST", body: form });
+    let body: any = null;
+    try { body = await response.json(); } catch { /* non-JSON proxy error */ }
+    if (!response.ok) {
+      const detail = body?.detail;
+      const message = typeof detail === "string" ? detail : detail?.message;
+      throw new CenterlineImportError(message ?? response.statusText ?? "Centerline import failed", detail?.code);
+    }
+    return body as CenterlineImportResult;
+  },
 
   // Job-based compute: start, then poll until done. RiverREM's interpolation %
   // is surfaced through onProgress(phase, pct).
