@@ -39,6 +39,10 @@ TERRAIN_TILE_URL = os.environ.get(
 TERRAIN_ENCODING = os.environ.get("TERRAIN_ENCODING", "terrarium")  # or "mapbox"
 # Absolute ceiling for the per-viewport probe; Mapterhorn reaches ~18-20 in places.
 TERRAIN_MAX_ZOOM = int(os.environ.get("TERRAIN_MAX_ZOOM", "20"))
+# RiverREM keeps several full-size arrays in memory. Preserve native custom-DEM
+# resolution up to this ceiling, then downsample the requested viewport before
+# computation so one high-resolution source cannot crash the API container.
+CUSTOM_DEM_MAX_PIXELS = int(os.environ.get("CUSTOM_DEM_MAX_PIXELS", "45000000"))
 TILE_SIZE = 256
 _UA = {"User-Agent": "riverrem-app/0.1"}
 
@@ -105,7 +109,14 @@ def max_available_zoom(lon: float, lat: float, ceiling: int | None = None) -> in
     return _max_zoom_cached(round(lon, 3), round(lat, 3), ceiling or TERRAIN_MAX_ZOOM)
 
 
-def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str, source_cog_url: str | None = None) -> dict:
+def build_dem(
+    bbox,
+    zoom: int,
+    resolution_multiplier: int,
+    out_path: str,
+    source_cog_url: str | None = None,
+    source_dem_path: str | None = None,
+) -> dict:
     """Fetch terrain tiles for `bbox`, decode, mosaic, reproject to UTM, write GeoTIFF.
 
     If `source_cog_url` is given, that elevation COG is used as the DEM instead of
@@ -124,22 +135,65 @@ def build_dem(bbox, zoom: int, resolution_multiplier: int, out_path: str, source
     utm_zone = int((cx0 + 180) / 6) + 1
     epsg_utm = (32600 if cy0 >= 0 else 32700) + utm_zone
 
-    if source_cog_url:
-        src = source_cog_url
-        if src.startswith("http://") or src.startswith("https://"):
+    if source_cog_url and source_dem_path:
+        raise ValueError("Choose either a source COG URL or a server DEM reference, not both")
+
+    if source_cog_url or source_dem_path:
+        src = source_dem_path or source_cog_url
+        if source_cog_url and (src.startswith("http://") or src.startswith("https://")):
             src = "/vsicurl/" + src
-        _log.info("DEM build: using provided source COG %s", source_cog_url)
-        gdal.Warp(
-            out_path, src,
+        _log.info("DEM build: using provided source %s", source_cog_url or "server DEM")
+        warp_args = dict(
             dstSRS=f"EPSG:{epsg_utm}",
             resampleAlg="bilinear",
             outputBounds=(bbox.west, bbox.south, bbox.east, bbox.north),
             outputBoundsSRS="EPSG:4326",
             dstNodata=-9999.0,
-            format="GTiff",
         )
+
+        # Ask GDAL for the native-resolution output shape without materializing
+        # its pixels. A 0.5 m DEM over a large viewport can otherwise create
+        # hundreds of millions of cells and exhaust RiverREM's working memory.
+        preview_path = f"/vsimem/riverrem-dem-preview-{time.time_ns()}.vrt"
+        preview = None
+        try:
+            preview = gdal.Warp(preview_path, src, format="VRT", **warp_args)
+            if preview is None or preview.RasterXSize < 1 or preview.RasterYSize < 1:
+                raise ValueError("The selected DEM does not overlap the map viewport")
+            native_width, native_height = preview.RasterXSize, preview.RasterYSize
+        finally:
+            preview = None
+            gdal.Unlink(preview_path)
+
+        width, height = native_width, native_height
+        native_pixels = width * height
+        if CUSTOM_DEM_MAX_PIXELS > 0 and native_pixels > CUSTOM_DEM_MAX_PIXELS:
+            scale = math.sqrt(native_pixels / CUSTOM_DEM_MAX_PIXELS)
+            width = max(1, round(width / scale))
+            height = max(1, round(height / scale))
+            _log.warning(
+                "Custom DEM viewport is %dx%d (%.1fM cells); downsampling to "
+                "%dx%d (%.1fM cells) for safe processing",
+                native_width, native_height, native_pixels / 1_000_000,
+                width, height, width * height / 1_000_000,
+            )
+
+        output = gdal.Warp(
+            out_path, src,
+            width=width, height=height,
+            outputType=gdal.GDT_Float32,
+            creationOptions=["TILED=YES", "COMPRESS=DEFLATE", "BIGTIFF=IF_SAFER"],
+            format="GTiff",
+            **warp_args,
+        )
+        if output is None:
+            raise ValueError("Could not prepare the selected DEM for this viewport")
+        output = None
         return {"path": out_path, "source_max_zoom": None, "dem_zoom": None,
-                "requested_zoom": None, "screen_zoom": zoom}
+                "requested_zoom": None, "screen_zoom": zoom,
+                "native_width": native_width, "native_height": native_height,
+                "dem_width": width, "dem_height": height,
+                "dem_downsampled": (width, height) != (native_width, native_height)}
 
     # want_z = the resolution requested (screen zoom + multiplier); source_max = the
     # deepest zoom Mapterhorn serves here; z = the clamp (no upsampling past source).
