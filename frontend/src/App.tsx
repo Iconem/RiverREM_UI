@@ -503,6 +503,11 @@ export default function App() {
     } catch (error) {
       if (error instanceof CenterlineImportError && error.code === "crs_required") {
         setCenterlineCrsRequired(true);
+      } else if (inputCrs) {
+        // A CRS was typed but refused (not an authority code, unknown): keep
+        // the prompt and the chosen file so it can be corrected in place.
+        setCenterlineCrsRequired(true);
+        alert(`Import failed: ${(error as Error).message}`);
       } else {
         console.error("[import] failed:", error);
         setPendingCenterlineFile(null);
