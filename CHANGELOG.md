@@ -20,6 +20,8 @@ sessions, so dates are approximate; the ordering is chronological.
 - **Color relief artifacts** (PR #1 by @johnhuebbe): the REM layer resamples with
   `nearest`.
 - **Large centerline import** no longer overflows the stack when fitting the map.
+- **Dark and Light basemaps** showed "API key required": CARTO now needs a key. They
+  are OpenFreeMap Dark and Positron instead (vector, no key, same tiles as Liberty).
 
 ### Changed
 - **GeoJSON centerlines are read in the browser** again (WGS84 by definition, nothing

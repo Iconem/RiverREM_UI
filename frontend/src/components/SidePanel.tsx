@@ -717,8 +717,8 @@ export function SidePanel(p: {
                   <SelectItem value="none">None</SelectItem>
                   <SelectItem value="liberty">Light (OpenFreeMap Liberty)</SelectItem>
                   <SelectItem value="osm-dark">Dark (Maptiler w. OFM tiles)</SelectItem>
-                  <SelectItem value="light">Light (OSM)</SelectItem>
-                  <SelectItem value="dark">Dark (OSM)</SelectItem>
+                  <SelectItem value="light">Light (OpenFreeMap Positron)</SelectItem>
+                  <SelectItem value="dark">Dark (OpenFreeMap)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

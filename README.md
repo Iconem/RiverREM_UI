@@ -284,7 +284,7 @@ rather pull prebuilt — point the compose `image:` at your registry and drop th
 - **Min / Max (m)** — independent, with a **log** slider and customisable slider bounds.
 - **Transparent** — fade the white or black end so a basemap shows through.
 - **Layer** — flip between REM and DEM (independent bounds each).
-- **Basemaps** — Dark / Light (CARTO), Satellite (Esri), opaque Hillshade (Mapterhorn), None.
+- **Basemaps** — Dark / Light (OpenFreeMap Dark and Positron, vector, no key), Satellite (Esri), opaque Hillshade (Mapterhorn), None.
 - **Resolution** (server) — 1x/2x/4x, probed against the deepest zoom Mapterhorn serves here.
 - **Runs** — every compute/loaded COG is saved to `localStorage` (server/client chip), reloadable
   with its full styling; list or gallery view, rename/delete/duplicate, thumbnails.

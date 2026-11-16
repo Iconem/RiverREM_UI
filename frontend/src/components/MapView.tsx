@@ -27,6 +27,8 @@ function ensureRemFetchPatch() {
 import type { BBox } from "@/lib/api";
 import ofmLibertyRaw from "@/styles/ofm-liberty.json";
 import osmDarkRaw from "@/styles/osm-dark.json";
+import ofmDarkRaw from "@/styles/ofm-dark.json";
+import ofmPositronRaw from "@/styles/ofm-positron.json";
 
 // Helper: take a layer list and stamp all layouts with visibility: "none".
 function hideLayers(layers: any[]): any[] {
@@ -40,6 +42,15 @@ const OFM_LAYER_IDS = OFM_LAYERS.map((l) => l.id as string);
 // OSM Dark layers (fonts already mapped to Noto Sans; reuses the same "openmaptiles" source as Liberty).
 const OSM_DARK_LAYERS = hideLayers(osmDarkRaw.layers as any[]);
 const OSM_DARK_LAYER_IDS = OSM_DARK_LAYERS.map((l) => l.id as string);
+
+// The "dark" and "light" basemaps: OpenFreeMap Dark and Positron (vector, no key;
+// CARTO's raster basemaps started answering "API key required" in 2026-11).
+// Same openmaptiles source, sprite and glyphs as Liberty; ids prefixed by
+// scripts/build-ofm-styles.mjs, which regenerates both files.
+const OFM_DARK_LAYERS = hideLayers(ofmDarkRaw.layers as any[]);
+const OFM_DARK_LAYER_IDS = OFM_DARK_LAYERS.map((l) => l.id as string);
+const OFM_POSITRON_LAYERS = hideLayers(ofmPositronRaw.layers as any[]);
+const OFM_POSITRON_LAYER_IDS = OFM_POSITRON_LAYERS.map((l) => l.id as string);
 
 // Register the geomatico COG protocol once. For the `cog://…#dem` path we register a
 // custom color function (below) that wins over geomatico's built-in terrain encoder,
@@ -74,16 +85,6 @@ const STYLE: StyleSpecification = {
   glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
   sprite: "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
   sources: {
-    "carto-dark": {
-      type: "raster",
-      tiles: ["https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png"],
-      tileSize: 256, attribution: "© OpenStreetMap © CARTO",
-    },
-    "carto-light": {
-      type: "raster",
-      tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"],
-      tileSize: 256, attribution: "© OpenStreetMap © CARTO",
-    },
     "esri-sat": {
       type: "raster",
       tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
@@ -98,8 +99,6 @@ const STYLE: StyleSpecification = {
   },
   layers: [
     { id: "bg", type: "background", paint: { "background-color": "#0a0a0a" } },
-    { id: "carto-dark", type: "raster", source: "carto-dark", layout: { visibility: "visible" } },
-    { id: "carto-light", type: "raster", source: "carto-light", layout: { visibility: "none" } },
     { id: "esri-sat", type: "raster", source: "esri-sat", layout: { visibility: "none" } },
     // Opaque hillshade BASEMAP: neutral grey fill under a native MapLibre hillshade
     // with opaque shadow/highlight colours, so relief reads as a standalone map.
@@ -118,11 +117,14 @@ const STYLE: StyleSpecification = {
     ...OFM_LAYERS,
     // OSM Dark layers (all hidden by default; shown when base === "osm-dark").
     ...OSM_DARK_LAYERS,
+    // OpenFreeMap Dark / Positron (base === "dark" / "light", the default is dark).
+    ...OFM_DARK_LAYERS,
+    ...OFM_POSITRON_LAYERS,
   ],
 };
 
 const BASE_LAYERS: Record<string, string[]> = {
-  dark: ["carto-dark"], light: ["carto-light"], satellite: ["esri-sat"],
+  dark: OFM_DARK_LAYER_IDS, light: OFM_POSITRON_LAYER_IDS, satellite: ["esri-sat"],
   hillshade: ["hs-bg", "mapterhorn-hillshade"],
   liberty: OFM_LAYER_IDS,
   "osm-dark": OSM_DARK_LAYER_IDS,
