@@ -707,7 +707,7 @@ export function SidePanel(p: {
             </div>
           </div>
           <div className="flex items-center justify-between gap-2"
-            title="Smooth: bilinear filtering. MapLibre blends the encoded bytes, not the heights, so thin rings can appear at every whole metre and at 0 m. Off: nearest pixel, exact values, blockier when zoomed in.">
+            title="Smooth: heights interpolated bilinearly before rendering, at every zoom. Off: each data pixel drawn as a square (nearest), handy to see the actual resolution.">
             <span className="font-mono text-[10px] text-muted-foreground">Smooth (bilinear)</span>
             <Switch checked={opts.smooth} onCheckedChange={(v) => setOpts({ smooth: v })} aria-label="Smooth colour relief (bilinear)" />
           </div>

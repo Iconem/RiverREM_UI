@@ -15,6 +15,7 @@
  */
 import maplibregl from "maplibre-gl";
 import { encode as encodePngFast } from "fast-png";
+import { sampleHeight } from "@/lib/demResample";
 
 export type RiverPoint = { mx: number; my: number; elev: number; lineId?: number };
 
@@ -25,6 +26,9 @@ const R_MERC = 6378137;
 let riverPts: RiverPoint[] = [];
 let idwPower = 1;
 let interpMode: "idw" | "jfa" | "edt" = "idw";
+// Bilinear (true) or nearest (false) sampling of the DEM heights, before the
+// terrarium encode: see lib/demResample.ts for why it happens here.
+let remSmooth = true;
 let registered = false;
 // Deepest Mapterhorn zoom known to exist for the current area (probed). buildREMTile
 // never fetches a DEM tile above this — it overzoom-samples the parent instead — so
@@ -546,9 +550,9 @@ export async function buildREMTile(z: number, x: number, y: number): Promise<Arr
         // Fractional position inside the loaded DEM tile [0,1), accounting for overzoom.
         const u = (subX + (px + 0.5) / outSz) / span;
         const v = (subY + (py + 0.5) / outSz) / span;
-        const cx = Math.min(demSz - 1, Math.floor(u * demSz));
-        const cy = Math.min(demSz - 1, Math.floor(v * demSz));
-        demElev = demFloat[cy * demSz + cx];
+        // Pixel-centre coordinates in the DEM tile; heights interpolated as
+        // floats (or nearest), never as encoded bytes.
+        demElev = sampleHeight(demFloat, demSz, demSz, u * demSz - 0.5, v * demSz - 0.5, remSmooth);
       }
       let wse = 0;
       if (havePts) {
@@ -596,7 +600,7 @@ export function getRemPerfStats(): RemPerfStats {
 export function ensureRemProtocol() {
   if (registered) return;
   maplibregl.addProtocol("rem", async (params: any) => {
-    const [z, x, y] = params.url.replace("rem://tiles/", "").split("/").map(Number);
+    const [z, x, y] = params.url.replace("rem://tiles/", "").split("?")[0].split("/").map(Number);
     return { data: await buildREMTile(z, x, y) };
   });
   registered = true;
@@ -609,6 +613,13 @@ export function setRemParams(pts: RiverPoint[], power: number, interp: "idw" | "
   interpMode = interp;
   tileCache.clear();
   wseGrid = buildWseGrid(pts);
+}
+
+/** Bilinear or nearest DEM sampling for rem:// tiles; clears the tile cache on change. */
+export function setRemSmooth(smooth: boolean) {
+  if (smooth === remSmooth) return;
+  remSmooth = smooth;
+  tileCache.clear();
 }
 
 export function clearRemCache() {

@@ -3,9 +3,9 @@ import Map, { type MapRef, NavigationControl, Popup } from "react-map-gl/maplibr
 import maplibregl from "maplibre-gl";
 import mlcontour from "maplibre-contour";
 import type { StyleSpecification, Map as MlMap } from "maplibre-gl";
-import { cogProtocol, setColorFunction } from "@geomatico/maplibre-cog-protocol";
+import { cogProtocol } from "@geomatico/maplibre-cog-protocol";
 import { colorReliefExpr } from "@/lib/colormap";
-import { ensureRemProtocol, setRemParams, buildREMTile, setRemMaxZoom, type RiverPoint } from "@/lib/remClient";
+import { ensureRemProtocol, setRemParams, setRemSmooth, buildREMTile, setRemMaxZoom, type RiverPoint } from "@/lib/remClient";
 
 // Patch window.fetch so maplibre-contour (worker:false) can resolve rem:// tile URLs.
 // addProtocol registrations are MapLibre-internal and invisible to external fetch().
@@ -17,7 +17,7 @@ function ensureRemFetchPatch() {
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
     if (url.startsWith("rem://tiles/")) {
-      const [z, x, y] = url.replace("rem://tiles/", "").split("/").map(Number);
+      const [z, x, y] = url.replace("rem://tiles/", "").split("?")[0].split("/").map(Number);
       const buf = await buildREMTile(z, x, y);
       return new Response(buf, { status: 200, headers: { "Content-Type": "image/png" } });
     }
@@ -25,6 +25,7 @@ function ensureRemFetchPatch() {
   };
 }
 import type { BBox } from "@/lib/api";
+import { ensureRemcogProtocol, remcogTileUrl, MAX_RENDER_ZOOM } from "@/lib/demResample";
 import ofmLibertyRaw from "@/styles/ofm-liberty.json";
 import osmDarkRaw from "@/styles/osm-dark.json";
 import ofmDarkRaw from "@/styles/ofm-dark.json";
@@ -66,16 +67,6 @@ function ensureProtocol() {
 // request, even across Strict-Mode double-mounts / HMR.
 ensureProtocol();
 
-// float height -> terrarium RGB. NoData (e.g. -9999) round-trips and is made
-// transparent by colorReliefExpr's sub-min floor stop.
-const terrariumColorFunction = (pixel: any, color: any) => {
-  const height = pixel[0];
-  const v = height + 32768;
-  const r = Math.floor(v / 256);
-  const g = Math.floor(v % 256);
-  const b = Math.floor((v - Math.floor(v)) * 256);
-  color.set([r, g, b, 255]);
-};
 
 const MAPTERHORN_DEM = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
 
@@ -211,28 +202,33 @@ export function MapView({
         if (!riverPoints || riverPoints.length === 0) return;
         ensureRemProtocol();
         setRemParams(riverPoints, idwPower, interpMode);
+        setRemSmooth(opts.smooth);
         map.addSource(src, {
           type: "raster-dem",
-          tiles: ["rem://tiles/{z}/{x}/{y}"],
+          // Smooth/nearest in the URL so toggling it fetches fresh tiles.
+          tiles: [`rem://tiles/{z}/{x}/{y}?s=${opts.smooth ? 1 : 0}`],
           tileSize: 256,
           encoding: "terrarium",
           bounds: cogBounds ?? undefined,
-          maxzoom: clientMaxZoom,
+          // Tiles past the DEM's deepest zoom are built from the parent DEM
+          // tile with height-space interpolation (buildREMTile), so MapLibre
+          // never stretches a texel: see lib/demResample.ts.
+          maxzoom: MAX_RENDER_ZOOM,
         } as any);
       }
     } else {
       if (!cogUrl) return;
-      const url = `cog://${cogUrl}#dem`;
-      // Force TERRARIUM encoding (~4 mm step) on the #dem path: a custom color function
-      // wins over geomatico's built-in terrain encoder. IMPORTANT: geomatico keys the
-      // function by the BARE cog url (no cog:// prefix, no #dem) — see its README.
-      setColorFunction(cogUrl, terrariumColorFunction);
+      // remcog:// (lib/demResample.ts) reads the COG at the matching overview and
+      // interpolates heights before the terrarium encode, at every zoom. geomatico's
+      // cog:// hardcodes nearest and stops at the COG's native zoom.
+      ensureRemcogProtocol(maplibregl.addProtocol as never);
       map.addSource(src, {
         type: "raster-dem",
-        url,
+        tiles: [remcogTileUrl(cogUrl, opts.smooth)],
         tileSize: 256,
         encoding: "terrarium",
         bounds: cogBounds ?? undefined,
+        maxzoom: MAX_RENDER_ZOOM,
       } as any);
     }
 
@@ -248,9 +244,10 @@ export function MapView({
 	      opts.transparent
 	    ) as any,
 	    "color-relief-opacity": 0.95,
-	    // See the "smooth" option in lib/state.ts: bilinear filters the packed
-	    // bytes (rings at whole metres and 0 m), nearest is exact but blocky.
-	    "resampling": opts.smooth ? "linear" : "nearest",
+	    // Always nearest: tiles arrive already resampled in height space at
+	    // about one texel per screen pixel. MapLibre's "linear" would blend the
+	    // packed terrarium bytes and draw rings (lib/demResample.ts).
+	    "resampling": "nearest",
 	  },
     } as any);
     remRef.current = { src, layer };
@@ -265,7 +262,7 @@ export function MapView({
     if (map.getLayer("viewport-fill")) map.moveLayer("viewport-fill");
     if (map.getLayer("viewport-line")) map.moveLayer("viewport-line");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, cogUrl, remToken, clientMaxZoom, isDemMode, ready]);
+  }, [engine, cogUrl, remToken, clientMaxZoom, isDemMode, ready, opts.smooth]);
 
   // Fit the camera to the COG only on an explicit signal (run load / compute
   // complete) — never on a plain REM/DEM layer toggle, which also changes cogUrl.
@@ -508,13 +505,6 @@ export function MapView({
     map.setPaintProperty(id, "color-relief-color", colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse, opts.transparent) as any);
   }, [opts.ramp, opts.reverse, opts.min, opts.max, opts.transparent, cogUrl, remToken, engine, ready]);
 
-  // Smooth (bilinear) or exact (nearest) colour relief.
-  useEffect(() => {
-    const map = mapRef.current?.getMap();
-    const id = remRef.current?.layer;
-    if (!map || !ready || !id || !map.getLayer(id)) return;
-    map.setPaintProperty(id, "resampling", opts.smooth ? "linear" : "nearest");
-  }, [opts.smooth, cogUrl, remToken, engine, ready]);
 
   // Layer show/hide (eye toggle).
   useEffect(() => {
