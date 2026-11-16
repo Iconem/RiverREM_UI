@@ -130,7 +130,7 @@ const BASE_LAYERS: Record<string, string[]> = {
   "osm-dark": OSM_DARK_LAYER_IDS,
 };
 
-type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number; hillshade: string; transparent: "none" | "white" | "black" };
+type Opts = { ramp: string; min: number; max: number; mode: string; base: string; reverse: boolean; oversample: number; hillshade: string; transparent: "none" | "white" | "black"; smooth: boolean };
 
 export function MapView({
   initialView, opts, cogUrl, cogBounds, fitSignal, theme, preview, remVisible, pickMode,
@@ -248,7 +248,9 @@ export function MapView({
 	      opts.transparent
 	    ) as any,
 	    "color-relief-opacity": 0.95,
-	    "resampling": "nearest",
+	    // See the "smooth" option in lib/state.ts: bilinear filters the packed
+	    // bytes (rings at whole metres and 0 m), nearest is exact but blocky.
+	    "resampling": opts.smooth ? "linear" : "nearest",
 	  },
     } as any);
     remRef.current = { src, layer };
@@ -505,6 +507,14 @@ export function MapView({
     if (!map || !ready || !id || !map.getLayer(id)) return;
     map.setPaintProperty(id, "color-relief-color", colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse, opts.transparent) as any);
   }, [opts.ramp, opts.reverse, opts.min, opts.max, opts.transparent, cogUrl, remToken, engine, ready]);
+
+  // Smooth (bilinear) or exact (nearest) colour relief.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    const id = remRef.current?.layer;
+    if (!map || !ready || !id || !map.getLayer(id)) return;
+    map.setPaintProperty(id, "resampling", opts.smooth ? "linear" : "nearest");
+  }, [opts.smooth, cogUrl, remToken, engine, ready]);
 
   // Layer show/hide (eye toggle).
   useEffect(() => {

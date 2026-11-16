@@ -24,7 +24,7 @@ type Opts = {
   engine: "server" | "client"; power: number; interp: "idw" | "jfa" | "edt"; samples: number; beta: boolean;
   base: "dark" | "light" | "satellite" | "hillshade" | "liberty" | "osm-dark" | "none";
   ramp: (typeof RAMP_NAMES)[number];
-  reverse: boolean; transparent: "none" | "white" | "black"; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; sliderLo: number | null; sliderHi: number | null; osm: string;
+  reverse: boolean; transparent: "none" | "white" | "black"; smooth: boolean; min: number; max: number; log: boolean; res: number; oversample: number; hillshade: "off" | "dark" | "light"; sliderLo: number | null; sliderHi: number | null; osm: string;
   qleverMode: "longest" | "all" | "waterways";
   polyWater: boolean;
   qleverGroupBy: boolean;
@@ -501,7 +501,9 @@ export function SidePanel(p: {
             </div>
           )}
 
-          <Button className="h-10 w-full" onClick={p.onCompute}
+          <Button className={`h-10 w-full ${busy ? "border border-amber-500 bg-transparent text-amber-500 hover:bg-amber-500/10" : ""}`}
+            variant={busy ? "outline" : "default"} onClick={p.onCompute}
+            title={busy ? "Click to abort the running computation" : undefined}
             disabled={!busy && opts.engine === "server" && (!demReady || p.demUploadBusy)}>
             {busy ? <span className="relative inline-flex h-4 w-4 shrink-0"><Loader2 className="h-4 w-4 animate-spin" /><X className="absolute inset-0 m-auto h-2.5 w-2.5" /></span> : <Play className="h-4 w-4" />}
             {busy ? "Abort Computing…" : "Compute REM"}
@@ -693,6 +695,9 @@ export function SidePanel(p: {
               </Tabs>
             </div>
             <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] text-muted-foreground"
+                title="Smooth: bilinear filtering. MapLibre blends the encoded bytes, not the heights, so thin rings can appear at every whole metre and at 0 m. Off: nearest pixel, exact values, blockier when zoomed in.">smooth</span>
+              <Switch checked={opts.smooth} onCheckedChange={(v) => setOpts({ smooth: v })} aria-label="Smooth colour relief (bilinear)" />
               <span className="font-mono text-[10px] text-muted-foreground">log</span>
               <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
             </div>

@@ -24,6 +24,10 @@ sessions, so dates are approximate; the ordering is chronological.
   are OpenFreeMap Dark and Positron instead (vector, no key, same tiles as Liberty).
 
 ### Changed
+- **Smooth switch** (Symbology, next to log): bilinear colour relief, the default, or
+  nearest. Bilinear in MapLibre blends the packed terrarium bytes, which draws thin rings
+  at whole metres and at 0 m (the artifacts PR #1 removed); nearest is exact.
+- **Compute REM** turns into an amber outlined Abort button while a run is going.
 - **GeoJSON centerlines are read in the browser** again (WGS84 by definition, nothing
   to reproject): the file never leaves the machine and works with the client engine
   and no backend. GeoPackage and Shapefile still go through the server.

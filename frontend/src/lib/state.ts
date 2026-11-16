@@ -53,6 +53,10 @@ export function useRemOptions() {
     min: parseAsFloat.withDefault(-1),
     max: parseAsFloat.withDefault(10),
     log: parseAsBoolean.withDefault(true),
+    // Colour relief texture filtering: true = bilinear (smooth), false = nearest.
+    // MapLibre filters the packed terrarium bytes, not the heights, so bilinear
+    // draws thin rings at every whole metre and at 0 m; nearest is exact.
+    smooth: parseAsBoolean.withDefault(true),
     res: parseAsInteger.withDefault(1), // 1 | 2 | 4 resolution multiplier
     oversample: parseAsInteger.withDefault(1), // GPU supersampling factor (× device DPR)
     layer: parseAsStringEnum(["rem", "dem"]).withDefault("rem"), // which COG is streamed
