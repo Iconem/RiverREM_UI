@@ -54,10 +54,14 @@ from .schemas import (
     ThumbRequest,
     ThumbResponse,
 )
+from . import egress_proxy
 from .security import resolve_under, validate_crs_code, validate_hex_id, validate_remote_url
 from .terrain import build_dem
 
 gdal.UseExceptions()
+# Every GDAL HTTP request (remote COGs) goes through a filtering proxy that only
+# connects to public addresses, redirects included (see egress_proxy.py).
+egress_proxy.install()
 
 DATA_DIR = os.environ.get("DATA_DIR", "./data")
 COG_DIR = os.path.join(DATA_DIR, "cogs")

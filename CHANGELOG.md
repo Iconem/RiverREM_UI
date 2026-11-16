@@ -30,6 +30,8 @@ sessions, so dates are approximate; the ordering is chronological.
 - Remote COG URLs (Compute and Load COG) must be public http(s) hosts: no local
   paths, other GDAL handlers, credentials, or loopback, private, link-local and
   metadata addresses (`ALLOW_PRIVATE_URLS=true` for local testing).
+  Every GDAL HTTP request goes through an in-process proxy that connects only to
+  checked public addresses, so redirects and DNS rebinding cannot reach internal hosts.
 - A typed CRS must be an authority code (`EPSG:6344`); `upload_id` must be a
   server id; `/sample` and `/runs/prune` paths must stay in the COG store; thumbnail
   ids drop dots. The legacy `/upload` route now extracts archives safely (PR #2).
