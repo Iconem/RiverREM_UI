@@ -235,9 +235,10 @@ docker compose -f docker-compose.local.yml up --build
 Open http://localhost:8088 (override with `WEB_PORT=NNNN`).
 
 Backend env: `TERRAIN_TILE_URL`, `TERRAIN_ENCODING` (`terrarium`|`mapbox`),
-`TERRAIN_MAX_ZOOM`, `PUBLIC_BASE`, `DATA_DIR`, `MAX_COGS`. Optional custom DEM
-uploads and a read-only server library are configured in
-[`docs/dem-sources.md`](docs/dem-sources.md).
+`TERRAIN_MAX_ZOOM`, `PUBLIC_BASE`, `DATA_DIR`, `MAX_COGS`, `MAX_CONCURRENT_JOBS`,
+`MAX_ACTIVE_JOBS`, `ALLOW_PRIVATE_URLS`. Optional custom DEM uploads and a
+read-only server library are configured in [`docs/dem-sources.md`](docs/dem-sources.md),
+which also lists what the API checks on every request (Security section).
 
 ---
 

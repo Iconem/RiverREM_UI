@@ -20,6 +20,10 @@ services:
       DEM_LIBRARY_DIR: ${DEM_LIBRARY_DIR:-}
       DEM_LIBRARY_LABEL: ${DEM_LIBRARY_LABEL:-Server library}
       CUSTOM_DEM_MAX_PIXELS: ${CUSTOM_DEM_MAX_PIXELS:-45000000}
+      ALLOW_PRIVATE_URLS: ${ALLOW_PRIVATE_URLS:-false}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-2}
+      MAX_ACTIVE_JOBS: ${MAX_ACTIVE_JOBS:-8}
+      JOB_RETENTION_SECONDS: ${JOB_RETENTION_SECONDS:-3600}
     volumes:
       - cogs:/data
       # Set DEM_LIBRARY_DIR=/dem-library to expose this read-only mount.

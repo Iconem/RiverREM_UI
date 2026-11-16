@@ -54,6 +54,7 @@ from .schemas import (
     ThumbRequest,
     ThumbResponse,
 )
+from .security import resolve_under, validate_crs_code, validate_hex_id, validate_remote_url
 from .terrain import build_dem
 
 gdal.UseExceptions()
@@ -213,6 +214,29 @@ def _set(job_id: str, **kw):
         JOBS[job_id].update(kw)
 
 
+# Each compute holds several full-size arrays and a CPU core for minutes. Run
+# at most MAX_CONCURRENT_JOBS at once; further jobs wait as "Queued", and past
+# MAX_ACTIVE_JOBS (running + queued) new requests get a 429 instead of piling
+# up threads. Finished jobs are forgotten after JOB_RETENTION_SECONDS.
+MAX_CONCURRENT_JOBS = max(1, int(os.environ.get("MAX_CONCURRENT_JOBS", "2")))
+MAX_ACTIVE_JOBS = max(MAX_CONCURRENT_JOBS, int(os.environ.get("MAX_ACTIVE_JOBS", "8")))
+JOB_RETENTION_SECONDS = max(60, int(os.environ.get("JOB_RETENTION_SECONDS", "3600")))
+_JOB_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_JOBS)
+_JOBS_LOCK = threading.Lock()
+
+
+def _forget_old_jobs() -> None:
+    cutoff = time.time() - JOB_RETENTION_SECONDS
+    for jid in [j for j, job in JOBS.items() if job.get("status") != "running" and job.get("finished", time.time()) < cutoff]:
+        JOBS.pop(jid, None)
+
+
+def _run_compute_slot(job_id: str, req: ComputeRequest):
+    with _JOB_SLOTS:
+        _run_compute(job_id, req)
+    _set(job_id, finished=time.time())
+
+
 def _bounds_intersection(a: list[float], b: list[float]) -> list[float] | None:
     intersection = [max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])]
     return intersection if intersection[0] < intersection[2] and intersection[1] < intersection[3] else None
@@ -265,8 +289,8 @@ def _preflight_custom_dem(
     """Reject fixed-extent DEM/analysis combinations that cannot produce a REM."""
     if not req.source_cog_url and not source_dem_path:
         return
-    if req.source_cog_url and not req.source_cog_url.startswith(("http://", "https://")):
-        raise ValueError("Custom DEM URLs must use http:// or https://")
+    if req.source_cog_url:
+        validate_remote_url(req.source_cog_url)
     source = source_dem_path or f"/vsicurl/{req.source_cog_url}"
     dataset = gdal.OpenEx(source, gdal.OF_RASTER | gdal.OF_READONLY)
     if dataset is None:
@@ -312,6 +336,7 @@ def _run_compute(job_id: str, req: ComputeRequest):
         elif req.centerline_mode == "shapefile":
             if not req.upload_id:
                 raise ValueError("upload_id required for shapefile mode")
+            validate_hex_id(req.upload_id, "upload id")
             centerline_shp = normalize_uploaded_shapefile(os.path.join(UPLOAD_DIR, req.upload_id))
 
         if req.source_cog_url or source_dem_path:
@@ -424,10 +449,9 @@ def prune_runs(req: PruneRequest):
     be gone. The client posts its known relative /cogs paths and drops any not
     returned here. Paths are constrained to COG_DIR (no traversal)."""
     existing: list[str] = []
-    root = os.path.abspath(COG_DIR)
-    for rel in req.paths:
-        fp = os.path.abspath(os.path.join(COG_DIR, rel))
-        if fp.startswith(root) and os.path.exists(fp):
+    for rel in req.paths[:1000]:
+        fp = resolve_under(COG_DIR, rel)
+        if fp and os.path.exists(fp):
             existing.append(rel)
     return PruneResponse(existing=existing)
 
@@ -443,7 +467,7 @@ def save_thumb(req: ThumbRequest):
         raise HTTPException(status_code=400, detail="invalid image data")
     if len(raw) > 2_000_000:
         raise HTTPException(status_code=413, detail="thumbnail too large")
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", req.id)[:80] or "thumb"
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", req.id)[:80] or "thumb"
     tdir = os.path.join(COG_DIR, "thumbs")
     os.makedirs(tdir, exist_ok=True)
     with open(os.path.join(tdir, f"{safe}.jpg"), "wb") as f:
@@ -575,6 +599,42 @@ def _normalize_geojson_document(source_path: str, destination: str) -> None:
         json.dump({"type": "FeatureCollection", "features": features}, file_obj)
 
 
+def _import_saved_centerline(source_path: str, suffix: str, filename: str, temp_dir: str, input_crs: str | None) -> list[dict]:
+    layers: list[dict] = []
+    if suffix in {".geojson", ".json"}:
+        normalized_path = os.path.join(temp_dir, "normalized.geojson")
+        _normalize_geojson_document(source_path, normalized_path)
+        layers = import_centerline_dataset(
+            normalized_path,
+            display_name=filename,
+            force_geojson_wgs84=True,
+        )
+        if len(layers) == 1:
+            layers[0]["name"] = os.path.splitext(filename)[0]
+    elif suffix == ".gpkg":
+        layers = import_centerline_dataset(
+            source_path,
+            display_name=filename,
+            input_crs=input_crs,
+        )
+    else:
+        extract_dir = os.path.join(temp_dir, "shapefile")
+        os.makedirs(extract_dir)
+        shp_paths = _safe_extract_shapefile_zip(source_path, extract_dir)
+        for shp_path in shp_paths:
+            relative = os.path.relpath(shp_path, extract_dir)
+            imported = import_centerline_dataset(
+                shp_path,
+                display_name=relative,
+                input_crs=input_crs,
+                layer_id_prefix=f"{relative}::",
+            )
+            for layer in imported:
+                layer["name"] = os.path.splitext(relative)[0]
+            layers.extend(imported)
+    return layers
+
+
 @app.post("/centerline/import")
 async def import_centerline_file(
     file: UploadFile = File(...),
@@ -590,41 +650,17 @@ async def import_centerline_file(
         )
 
     try:
+        input_crs = validate_crs_code(input_crs)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
         with tempfile.TemporaryDirectory(prefix="riverrem-centerline-") as temp_dir:
             source_path = os.path.join(temp_dir, f"source{suffix}")
             await _save_centerline_upload(file, source_path)
-            layers: list[dict] = []
-            if suffix in {".geojson", ".json"}:
-                normalized_path = os.path.join(temp_dir, "normalized.geojson")
-                _normalize_geojson_document(source_path, normalized_path)
-                layers = import_centerline_dataset(
-                    normalized_path,
-                    display_name=filename,
-                    force_geojson_wgs84=True,
-                )
-                if len(layers) == 1:
-                    layers[0]["name"] = os.path.splitext(filename)[0]
-            elif suffix == ".gpkg":
-                layers = import_centerline_dataset(
-                    source_path,
-                    display_name=filename,
-                    input_crs=input_crs,
-                )
-            else:
-                extract_dir = os.path.join(temp_dir, "shapefile")
-                os.makedirs(extract_dir)
-                shp_paths = _safe_extract_shapefile_zip(source_path, extract_dir)
-                for shp_path in shp_paths:
-                    relative = os.path.relpath(shp_path, extract_dir)
-                    imported = import_centerline_dataset(
-                        shp_path,
-                        display_name=relative,
-                        input_crs=input_crs,
-                        layer_id_prefix=f"{relative}::",
-                    )
-                    for layer in imported:
-                        layer["name"] = os.path.splitext(relative)[0]
-                    layers.extend(imported)
+            # GDAL/GeoPandas parsing is blocking: keep it off the event loop so
+            # one large file does not stall every other request.
+            layers = await asyncio.to_thread(_import_saved_centerline, source_path, suffix, filename, temp_dir, input_crs)
             return {"filename": filename, "layers": layers}
     except CenterlineCrsRequired as exc:
         raise HTTPException(
@@ -662,9 +698,14 @@ async def upload_shapefile(file: UploadFile = File(...)):
 def compute(req: ComputeRequest):
     """Start a compute job; returns a job_id. Poll GET /compute/{job_id} for
     progress (RiverREM's interpolation % is surfaced) and the final result."""
-    job_id = uuid.uuid4().hex
-    JOBS[job_id] = {"status": "running", "phase": "Queued", "pct": 0}
-    threading.Thread(target=_run_compute, args=(job_id, req), daemon=True).start()
+    with _JOBS_LOCK:
+        _forget_old_jobs()
+        active = sum(1 for job in JOBS.values() if job.get("status") == "running")
+        if active >= MAX_ACTIVE_JOBS:
+            raise HTTPException(status_code=429, detail="The server is busy with other computations; try again in a few minutes")
+        job_id = uuid.uuid4().hex
+        JOBS[job_id] = {"status": "running", "phase": "Queued", "pct": 0}
+    threading.Thread(target=_run_compute_slot, args=(job_id, req), daemon=True).start()
     return {"job_id": job_id}
 
 
@@ -680,8 +721,8 @@ def compute_status(job_id: str):
 def sample(path: str, lng: float, lat: float):
     """Read the value of a served COG (by its /cogs relative path) at a lng/lat.
     Used by the click/hover altitude picker. COGs are EPSG:3857."""
-    fp = os.path.normpath(os.path.join(COG_DIR, path))
-    if not fp.startswith(os.path.abspath(COG_DIR)) or not os.path.exists(fp):
+    fp = resolve_under(COG_DIR, path)
+    if not fp or not os.path.isfile(fp):
         raise HTTPException(status_code=404, detail="Unknown COG")
     ds = gdal.Open(fp)
     if ds is None:
@@ -957,6 +998,10 @@ def cog_ingest(req: CogIngestRequest):
     only the needed blocks are fetched. Output is downsampled to ~3k px on the long
     side for a fast overview the client can style; recompute/zoom for full detail.
     """
+    try:
+        validate_remote_url(req.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     try:
         src = gdal.Open("/vsicurl/" + req.url)
     except Exception as e:

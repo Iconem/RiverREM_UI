@@ -78,3 +78,30 @@ leave `DEM_LIBRARY_DIR` blank and restart.
 
 Sending both custom-source fields is rejected. Client-provided filesystem paths
 are never accepted.
+
+## Security
+
+DEM uploads and the server library are off unless configured; a public
+deployment that leaves them off stores only the DEMs it fetches from Mapterhorn
+and the REM outputs. What the API checks on every request:
+
+- **Remote URLs** (`source_cog_url`, `POST /cog/ingest`): `http`/`https` only, no
+  embedded credentials, and the host must resolve to public addresses only
+  (no loopback, private, link-local or cloud metadata addresses), so the API
+  cannot be used to reach services on the host's network. GDAL resolves the
+  host again when it connects and follows redirects, so keep the API container
+  without a route to internal services as well. `ALLOW_PRIVATE_URLS=true`
+  lifts the address check for local testing only.
+- **Typed CRS** (centerline import): an authority code such as `EPSG:6344`;
+  PROJ strings and paths are refused.
+- **Ids and paths**: `upload_id` must be a server-generated id; `/sample` and
+  `/runs/prune` paths must stay inside the COG store (symlinks resolved);
+  thumbnail ids are reduced to letters, digits, `_` and `-`.
+- **Archives**: zipped shapefiles are extracted with no absolute or `..` paths,
+  no symlinks, at most 256 files and 256 MB uncompressed, shapefile parts only.
+- **Compute load**: at most `MAX_CONCURRENT_JOBS` computations run at once
+  (default 2); past `MAX_ACTIVE_JOBS` running or queued (default 8) new requests
+  get HTTP 429. Finished job status is kept `JOB_RETENTION_SECONDS` (1 h).
+- **Centerline files** are parsed in a temporary directory that is deleted
+  afterwards, off the request loop, within `CENTERLINE_UPLOAD_MAX_BYTES`,
+  `CENTERLINE_MAX_FEATURES` and `CENTERLINE_MAX_VERTICES`.

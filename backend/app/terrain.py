@@ -24,6 +24,8 @@ from functools import lru_cache
 import numpy as np
 import requests
 from osgeo import gdal, osr
+
+from .security import validate_remote_url
 from PIL import Image
 from io import BytesIO
 
@@ -140,8 +142,10 @@ def build_dem(
 
     if source_cog_url or source_dem_path:
         src = source_dem_path or source_cog_url
-        if source_cog_url and (src.startswith("http://") or src.startswith("https://")):
-            src = "/vsicurl/" + src
+        if source_cog_url:
+            # Never hand GDAL a bare client string: it would open local paths
+            # and /vsi*/ handlers too. Only checked public http(s) URLs.
+            src = "/vsicurl/" + validate_remote_url(source_cog_url)
         _log.info("DEM build: using provided source %s", source_cog_url or "server DEM")
         warp_args = dict(
             dstSRS=f"EPSG:{epsg_utm}",
