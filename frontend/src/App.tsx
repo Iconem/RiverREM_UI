@@ -4,6 +4,7 @@ import { MapView } from "@/components/MapView";
 import { SidePanel } from "@/components/SidePanel";
 import { useMapView, useRemOptions, useActiveRem, useUiState } from "@/lib/state";
 import { api, cogPath, geocode, reverseGeocode, CenterlineImportError, type BBox, type CenterlineImportLayer, type ComputeResponse, type DemCapabilities, type DemItem, type GeoHit, type GalleryItem } from "@/lib/api";
+import { importGeoJsonCenterline, isGeoJsonFile, lineBounds } from "@/lib/centerlineImport";
 import { fetchLongestRiver, fetchAllRivers, fetchAllWaterways, mergeFeatureCollection, OVERPASS_PRESETS } from "@/lib/osm";
 import { sampleRiverPoints, setRemParams, packPts, unpackPts, probeMaxZoom, sampleAt, sampleDemBounds, getRemPerfStats, exportRemCog, exportDemCog, type RiverPoint, type RemPerfStats } from "@/lib/remClient";
 import { listRuns, addRun, removeRun, updateRun, pruneRuns, type Run } from "@/lib/history";
@@ -453,12 +454,7 @@ export default function App() {
       (feature) => feature.geometry?.type === "LineString" || feature.geometry?.type === "MultiLineString",
     );
     const importedFc: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: lineFeatures };
-    const coords: number[][] = [];
-    for (const feature of lineFeatures) {
-      const geometry = feature.geometry;
-      if (geometry.type === "LineString") coords.push(...geometry.coordinates);
-      else if (geometry.type === "MultiLineString") for (const line of geometry.coordinates) coords.push(...line);
-    }
+    const bounds = lineBounds(lineFeatures);
 
     // TerraDraw may adopt the normalized WGS84 features for editing, but the
     // returned GeoJSON remains authoritative for preview and computation.
@@ -484,13 +480,8 @@ export default function App() {
     setResult(null); setRiverPoints(null); setActiveRunId(null);
     setOpts({ mode: "geojson", showContours: false, showSamples: false });
 
-    if (coords.length > 0 && mapRef.current) {
-      const lngs = coords.map((coordinate) => coordinate[0]);
-      const lats = coords.map((coordinate) => coordinate[1]);
-      mapRef.current.fitBounds(
-        [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)],
-        { padding: 60, duration: 600, maxZoom: 14 },
-      );
+    if (bounds && mapRef.current) {
+      mapRef.current.fitBounds(bounds, { padding: 60, duration: 600, maxZoom: 14 });
     }
   }, [setOpts]);
 
@@ -499,7 +490,11 @@ export default function App() {
     setCenterlineCrsRequired(false);
     setPendingCenterlineFile(file);
     try {
-      const imported = await api.importCenterline(file, inputCrs);
+      // GeoJSON is WGS84 by definition: read it here, no upload. GeoPackage and
+      // Shapefile need the server's GDAL for their CRS.
+      const imported = isGeoJsonFile(file)
+        ? await importGeoJsonCenterline(file)
+        : await api.importCenterline(file, inputCrs);
       if (imported.layers.length === 0) throw new Error("No line layers were found.");
       setCenterlineLayers(imported.layers);
       setCenterlineInputCrs("");

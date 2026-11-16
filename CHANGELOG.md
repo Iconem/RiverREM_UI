@@ -7,6 +7,36 @@ sessions, so dates are approximate; the ordering is chronological.
 `0.1.0` is the initial RiverREM Python-backend app. `1.0.0` introduces the pure-frontend
 (client-side JS) REM engine. Anything before `1.0.0` is server-only.
 
+## [1.11.0] — 2026-11-16
+
+### Added
+- **Configurable DEM sources and centerline files** (PR #2 by @johnhuebbe): GeoPackage
+  and zipped Shapefile centerlines reprojected from their CRS, a layer picker and an
+  import summary; optional DEM upload and read-only server library (both off unless
+  configured); a coverage check before each run; large custom DEM windows downsampled
+  to `CUSTOM_DEM_MAX_PIXELS`.
+
+### Fixed
+- **Color relief artifacts** (PR #1 by @johnhuebbe): the REM layer resamples with
+  `nearest`.
+- **Large centerline import** no longer overflows the stack when fitting the map.
+
+### Changed
+- **GeoJSON centerlines are read in the browser** again (WGS84 by definition, nothing
+  to reproject): the file never leaves the machine and works with the client engine
+  and no backend. GeoPackage and Shapefile still go through the server.
+
+### Security
+- Remote COG URLs (Compute and Load COG) must be public http(s) hosts: no local
+  paths, other GDAL handlers, credentials, or loopback, private, link-local and
+  metadata addresses (`ALLOW_PRIVATE_URLS=true` for local testing).
+- A typed CRS must be an authority code (`EPSG:6344`); `upload_id` must be a
+  server id; `/sample` and `/runs/prune` paths must stay in the COG store; thumbnail
+  ids drop dots. The legacy `/upload` route now extracts archives safely (PR #2).
+- Compute jobs are capped (`MAX_CONCURRENT_JOBS` 2 running, `MAX_ACTIVE_JOBS` 8 with
+  the queue, then HTTP 429) and finished job status is dropped after an hour.
+- Centerline files are parsed off the request loop.
+
 ## [1.10.0] — 2026-06-16
 
 ### Added
