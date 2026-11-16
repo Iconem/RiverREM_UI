@@ -32,6 +32,9 @@ class ComputeRequest(BaseModel):
     # Optional elevation COG to use as the DEM instead of Mapterhorn terrain tiles
     # (read remotely via GDAL /vsicurl/). When set, the zoom machinery is bypassed.
     source_cog_url: Optional[str] = None
+    # Opaque reference returned by the DEM upload or server-library endpoints.
+    # The API resolves this server-side; clients never submit filesystem paths.
+    source_dem_ref: Optional[str] = None
 
     # IDW power for the river-surface interpolation (applied if the installed
     # RiverREM exposes a power kwarg; otherwise parsed and ignored).
@@ -64,6 +67,13 @@ class ComputeResponse(BaseModel):
     source_max_zoom: Optional[int] = None  # deepest zoom Mapterhorn serves at this spot
     dem_zoom: Optional[int] = None         # zoom actually fetched (clamped)
     requested_zoom: Optional[int] = None   # screen zoom + multiplier
+    # Custom DEM size guard metadata. When downsampled is true, the UI explains
+    # that the server reduced this viewport before RiverREM processing.
+    dem_downsampled: bool = False
+    native_width: Optional[int] = None
+    native_height: Optional[int] = None
+    processed_dem_width: Optional[int] = None
+    processed_dem_height: Optional[int] = None
 
 
 class PruneRequest(BaseModel):
@@ -102,3 +112,8 @@ class CogIngestResponse(BaseModel):
     bounds: list[float]   # full source extent in WGS84 [w, s, e, n] for fitBounds
     rem_min: float
     rem_max: float
+
+
+class DemUploadInitRequest(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=512)
+    size_bytes: int = Field(..., gt=0)

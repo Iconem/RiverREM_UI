@@ -33,7 +33,7 @@ transparency) stays client-side and recolours instantly with no recompute.
 | | **Server** (default) | **Client** (beta) |
 |---|---|---|
 | Where | FastAPI + GDAL + RiverREM | entirely in the browser |
-| DEM | Mapterhorn tiles -> UTM mosaic | Mapterhorn tiles, read per-tile |
+| DEM | Mapterhorn, COG URL, streamed upload, or server library -> UTM | Mapterhorn tiles, read per-tile |
 | IDW | RiverREM: **k-NN, power 1**, KD-tree, `k` from sinuosity (faithful) | **all sampled points**, power configurable (QGIS-style) |
 | Output | single-band float32 COG (EPSG:3857) | `rem://` terrarium tiles built live, per tile |
 | Strength | fidelity, full-res, exports | no backend, live recompute, fast |
@@ -148,15 +148,68 @@ recolours instantly. The client engine skips all of that and runs in the browser
   "zoom": 13, "resolution_multiplier": 1, "idw_power": 2,
   "centerline_mode": "geojson",
   "centerline_geojson": { "type": "FeatureCollection", "features": [] },
-  "source_cog_url": null
+  "source_cog_url": null,
+  "source_dem_ref": null
 }
 ```
 -> `{ job_id, cog_url, dem_url, bounds:[w,s,e,n], rem_min, rem_max, width, height, river_name, river_length_m }`
 
-Other endpoints: `POST /cog/ingest` (reproject any-CRS COG to 3857), `POST /upload`
+Other endpoints: `GET /capabilities`, `POST /centerline/import`, `GET /dem/library`, `POST /dem/uploads`,
+`PUT /dem/uploads/{id}`, `POST /cog/ingest` (reproject any-CRS COG to 3857), `POST /upload`
 (zipped shapefile -> `upload_id`), `POST /thumb` (store a run thumbnail), `POST /runs/prune`.
 `source_cog_url` lets RiverREM use your own elevation COG (read via GDAL `/vsicurl/`)
 instead of Mapterhorn.
+
+Centerline uploads accept WGS84 GeoJSON, GeoPackage, and zipped shapefiles. GIS
+files with an assigned CRS are reprojected to WGS84 for the map; RiverREM then
+reprojects the normalized linework to the DEM CRS for computation. See
+[`docs/centerline-imports.md`](docs/centerline-imports.md).
+
+---
+
+## Using custom DEMs and centerlines
+
+Custom DEMs are available with the **Server** engine. Open **Compute**, choose a
+**DEM source**, and select one of:
+
+- **Mapterhorn** — downloads terrain for the current viewport; no setup required.
+- **COG URL** — enter an HTTP(S) URL for a remotely accessible elevation COG.
+- **Upload local DEM** — stream a georeferenced `.tif`/`.tiff` from the browser.
+  The server must enable uploads; uploaded DEMs expire and are removed automatically.
+- **Server library** — choose a DEM installed by the server owner. This option is
+  shown only when a library has been configured.
+
+To enable the optional sources, copy `.env.example` to `.env`, configure the
+desired settings, and rebuild the stack. A typical local configuration is:
+
+```dotenv
+DEM_UPLOAD_ENABLED=true
+DEM_UPLOAD_MAX_BYTES=21474836480
+DEM_UPLOAD_TTL_HOURS=24
+DEM_LIBRARY_HOST_DIR=/absolute/host/path/to/dems
+DEM_LIBRARY_DIR=/dem-library
+DEM_LIBRARY_LABEL=Available DEMs
+CUSTOM_DEM_MAX_PIXELS=45000000
+```
+
+The library is mounted read-only. On a public deployment it contains only DEMs
+installed by that server's administrator; leaving `DEM_LIBRARY_DIR` blank hides
+the library option. Large custom DEM viewports are reduced only when they exceed
+`CUSTOM_DEM_MAX_PIXELS`. The server checks that a custom DEM overlaps the current
+viewport and uploaded centerline before starting RiverREM. Full configuration,
+retention, and public-server guidance is in [`docs/dem-sources.md`](docs/dem-sources.md).
+
+To import a centerline, select **Draw**, click **Upload Centerline File**, and use:
+
+- `.geojson`/`.json` with EPSG:4326 longitude/latitude coordinates;
+- `.gpkg` with an assigned CRS (choose a layer if it contains several); or
+- `.zip` containing the `.shp`, `.shx`, and `.dbf` components of a Shapefile.
+
+GeoPackage and Shapefile linework is converted to EPSG:4326 for display. If its
+CRS metadata is missing, the UI asks for a source CRS such as `EPSG:6344`.
+The import summary shows the detected CRS, line/coordinate counts, length, and
+any skipped empty, invalid, or non-line features. See
+[`docs/centerline-imports.md`](docs/centerline-imports.md) for limits and validation details.
 
 ---
 
@@ -182,7 +235,9 @@ docker compose -f docker-compose.local.yml up --build
 Open http://localhost:8088 (override with `WEB_PORT=NNNN`).
 
 Backend env: `TERRAIN_TILE_URL`, `TERRAIN_ENCODING` (`terrarium`|`mapbox`),
-`TERRAIN_MAX_ZOOM`, `PUBLIC_BASE`, `DATA_DIR`, `MAX_COGS`.
+`TERRAIN_MAX_ZOOM`, `PUBLIC_BASE`, `DATA_DIR`, `MAX_COGS`. Optional custom DEM
+uploads and a read-only server library are configured in
+[`docs/dem-sources.md`](docs/dem-sources.md).
 
 ---
 
