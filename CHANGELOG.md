@@ -31,6 +31,9 @@ sessions, so dates are approximate; the ordering is chronological.
   with nearest). Server COGs go through a new `remcog://` reader (geotiff.js, matching
   overview, NoData never blended); the client engine samples its DEM the same way. The
   **Smooth** switch picks bilinear (default) or nearest heights.
+- **Server-engine REM contours follow the REM** (through `remcog://`, like the client
+  engine's `rem://`) instead of Mapterhorn absolute elevation. NoData is encoded as
+  -20000, below maplibre-contour's valid range, so contours stop at the REM's edge.
 - **Compute REM** turns into an amber outlined Abort button while a run is going.
 - **GeoJSON centerlines are read in the browser** again (WGS84 by definition, nothing
   to reproject): the file never leaves the machine and works with the client engine

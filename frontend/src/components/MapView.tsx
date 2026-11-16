@@ -7,7 +7,8 @@ import { cogProtocol } from "@geomatico/maplibre-cog-protocol";
 import { colorReliefExpr } from "@/lib/colormap";
 import { ensureRemProtocol, setRemParams, setRemSmooth, buildREMTile, setRemMaxZoom, type RiverPoint } from "@/lib/remClient";
 
-// Patch window.fetch so maplibre-contour (worker:false) can resolve rem:// tile URLs.
+// Patch window.fetch so maplibre-contour (worker:false) can resolve rem:// and
+// remcog:// tile URLs (server-engine REM contours).
 // addProtocol registrations are MapLibre-internal and invisible to external fetch().
 let _remFetchPatched = false;
 function ensureRemFetchPatch() {
@@ -21,11 +22,16 @@ function ensureRemFetchPatch() {
       const buf = await buildREMTile(z, x, y);
       return new Response(buf, { status: 200, headers: { "Content-Type": "image/png" } });
     }
+    const m = /^remcog:\/\/([^/]+)\/(\d+)\/(\d+)\/(\d+)(?:\?s=([01]))?$/.exec(url);
+    if (m) {
+      const buf = await buildCogTile(decodeURIComponent(m[1]), +m[2], +m[3], +m[4], m[5] !== "0", init?.signal ?? undefined);
+      return new Response(buf, { status: 200, headers: { "Content-Type": "image/png" } });
+    }
     return orig(input, init);
   };
 }
 import type { BBox } from "@/lib/api";
-import { ensureRemcogProtocol, remcogTileUrl, MAX_RENDER_ZOOM } from "@/lib/demResample";
+import { ensureRemcogProtocol, remcogTileUrl, buildCogTile, MAX_RENDER_ZOOM } from "@/lib/demResample";
 import ofmLibertyRaw from "@/styles/ofm-liberty.json";
 import osmDarkRaw from "@/styles/osm-dark.json";
 import ofmDarkRaw from "@/styles/ofm-dark.json";
@@ -365,20 +371,27 @@ export function MapView({
     removeContours();
 
     try {
-      // Client non-DEM mode: use the live REM tiles (rem://). We patch window.fetch
-      // so maplibre-contour (worker:false) can resolve the custom scheme in the main thread.
-      // All other modes: use Mapterhorn absolute-elevation tiles (web worker is fine there).
-      const useRemTiles = engine === "client" && !isDemMode;
-      const contourUrl = useRemTiles ? "rem://tiles/{z}/{x}/{y}" : MAPTERHORN_DEM;
+      // REM contours follow the REM itself: client engine = live rem:// tiles,
+      // server engine = the REM COG through remcog:// (same height-space
+      // resampling as the colour relief). We patch window.fetch so
+      // maplibre-contour (worker:false) can resolve both schemes in the main
+      // thread. DEM mode: Mapterhorn absolute elevation (web worker is fine there).
+      const serverRem = engine === "server" && !isDemMode && !!cogUrl;
+      const useRemTiles = (engine === "client" && !isDemMode) || serverRem;
+      const contourUrl = serverRem ? remcogTileUrl(cogUrl!, opts.smooth)
+        : useRemTiles ? "rem://tiles/{z}/{x}/{y}" : MAPTERHORN_DEM;
       if (useRemTiles) ensureRemFetchPatch();
+      // remcog:// serves any zoom (upsampled in height space); Mapterhorn and
+      // rem:// are capped at the probed Mapterhorn depth (no over-zoom 404s).
+      const demMaxZoom = serverRem ? 15 : clientMaxZoom;
       // Recreate DemSource when the tile URL changes (e.g. switching REM ↔ DEM mode or engine).
-      const srcKey = `${contourUrl}@${clientMaxZoom}`;
+      const srcKey = `${contourUrl}@${demMaxZoom}`;
       if (!demSourceRef.current || (demSourceRef.current as any).__key !== srcKey) {
         demSourceRef.current = new mlcontour.DemSource({
           url: contourUrl,
           encoding: "terrarium",
-          maxzoom: clientMaxZoom, // cap at probed Mapterhorn depth (no over-zoom 404s)
-          worker: !useRemTiles, // rem:// only resolves in main thread via patched fetch
+          maxzoom: demMaxZoom,
+          worker: !useRemTiles, // rem:// and remcog:// only resolve in the main thread via patched fetch
           // worker:false path returns its CACHED MVT buffer directly; maplibre transfers
           // (detaches) it, so a cache hit on re-request throws DataCloneError. Disabling
           // the cache forces a fresh buffer per request. The worker path clones, so it's fine.
@@ -436,7 +449,7 @@ export function MapView({
       console.warn("[contours] setup failed:", e);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDemMode, engine, remToken, ready, riverPoints, cogUrl, clientMaxZoom]);
+  }, [isDemMode, engine, remToken, ready, riverPoints, cogUrl, clientMaxZoom, opts.smooth]);
 
   // Cap the Mapterhorn hillshade/relief source at the probed deepest zoom so it
   // overzooms (reuses parent tiles) instead of requesting 404s above coverage.

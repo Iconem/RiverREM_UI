@@ -88,7 +88,8 @@ export function colorReliefExpr(name: string, min: number, max: number, reverse 
   };
   const css = (r: number, g: number, b: number) => `rgba(${r},${g},${b},${(alphaOf(r, g, b) / 255).toFixed(3)})`;
   const [, [fr, fg, fb]] = stops[0];
-  // Nodata is -9999; keep a transparent band from -9999 up to a safe threshold
+  // Nodata is -9999 (remcog:// tiles use -20000, which clamps to this first,
+  // transparent stop); keep a transparent band from -9999 up to a safe threshold
   // well below any real REM/DEM value, then snap to the first ramp colour.
   const NODATA    = -9999;
   const nodataTop = NODATA + (min - NODATA) * 0.9; // 90% of the way from -9999 to min

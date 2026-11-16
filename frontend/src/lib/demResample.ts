@@ -23,7 +23,10 @@ import { fromUrl, type GeoTIFF, type GeoTIFFImage } from "geotiff";
 import { encode as encodePngFast } from "fast-png";
 
 export const MAX_RENDER_ZOOM = 22;
-export const NODATA_OUT = -9999; // made transparent by colorReliefExpr's sub-min stop
+// NoData in the encoded tiles. Below maplibre-contour's valid range (-12000 m),
+// so contours skip those cells instead of piling up along the edge, and below
+// any ramp minimum, so colorReliefExpr's sub-min stop draws it transparent.
+export const NODATA_OUT = -20000;
 const TILE = 256;
 const HALF = 20037508.342789244; // Web Mercator half extent (m)
 
