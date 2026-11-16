@@ -13,13 +13,15 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-8 w-full items-center justify-between rounded-md border border-input bg-transparent px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring",
+      // min-w-0 + overflow-hidden + a truncating value: a long label is cut with
+      // an ellipsis instead of pushing the trigger past its box.
+      "flex h-8 w-full min-w-0 items-center justify-between gap-1 overflow-hidden rounded-md border border-input bg-transparent px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring",
       className
     )}
     {...props}
   >
-    {children}
-    <SelectPrimitive.Icon asChild><ChevronDown className="h-3.5 w-3.5 opacity-60" /></SelectPrimitive.Icon>
+    <span className="min-w-0 flex-1 truncate text-left">{children}</span>
+    <SelectPrimitive.Icon asChild><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" /></SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
 SelectTrigger.displayName = "SelectTrigger";

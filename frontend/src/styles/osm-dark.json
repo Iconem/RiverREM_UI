@@ -10802,7 +10802,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Italic",
           "Noto Sans Italic"
         ],
         "text-max-width": 5,
@@ -10855,7 +10854,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 5,
@@ -10896,7 +10894,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 5,
@@ -11007,8 +11004,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -11165,8 +11161,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -11245,8 +11240,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Bold",
-          "Noto Sans Regular"
+          "Noto Sans Bold"
         ],
         "text-max-width": 14,
         "text-offset": [
@@ -11316,8 +11310,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Italic",
-          "Noto Sans Regular"
+          "Noto Sans Italic"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -11381,8 +11374,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -11454,8 +11446,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Italic",
-          "Noto Sans Bold"
+          "Noto Sans Italic"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -11528,7 +11519,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 9,
@@ -11605,8 +11595,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -11682,8 +11671,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -11767,8 +11755,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -11852,8 +11839,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -11919,8 +11905,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -12038,7 +12023,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 9,
@@ -12187,8 +12171,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -12259,8 +12242,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -12334,8 +12316,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 9,
         "text-offset": [
@@ -12407,7 +12388,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 14,
@@ -12490,7 +12470,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Bold",
           "Noto Sans Bold"
         ],
         "text-max-width": 14,
@@ -12556,7 +12535,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Italic",
           "Noto Sans Italic"
         ],
         "text-max-width": 6,
@@ -12623,7 +12601,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Italic",
           "Noto Sans Italic"
         ],
         "text-max-width": 9,
@@ -12709,7 +12686,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Bold",
           "Noto Sans Bold"
         ],
         "text-max-width": 14,
@@ -12957,7 +12933,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-offset": [
@@ -13029,7 +13004,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-offset": [
@@ -13492,7 +13466,6 @@
           ]
         },
         "text-font": [
-          "Noto Sans Italic",
           "Noto Sans Italic"
         ],
         "text-max-width": 9,
@@ -13557,7 +13530,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Italic",
           "Noto Sans Italic"
         ],
         "text-size": {
@@ -13598,7 +13570,6 @@
       "layout": {
         "text-field": "{ref}",
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-size": {
@@ -13656,7 +13627,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 10,
@@ -13750,7 +13720,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Italic",
           "Noto Sans Italic"
         ],
         "text-max-width": {
@@ -13828,7 +13797,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Italic",
           "Noto Sans Italic"
         ],
         "text-size": 12,
@@ -13889,7 +13857,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Bold",
           "Noto Sans Bold"
         ],
         "text-max-width": 6,
@@ -13966,7 +13933,6 @@
           ]
         },
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-line-height": 1.1,
@@ -14024,7 +13990,6 @@
           ]
         },
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-line-height": 1.1,
@@ -14081,7 +14046,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 8,
@@ -14142,7 +14106,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 8,
@@ -14207,8 +14170,7 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-letter-spacing": 0,
         "text-padding": 2,
@@ -14293,7 +14255,6 @@
           ]
         ],
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 8,
@@ -14374,7 +14335,6 @@
         "text-anchor": "bottom",
         "text-field": "{name:en}",
         "text-font": [
-          "Noto Sans Regular",
           "Noto Sans Regular"
         ],
         "text-max-width": 8,
@@ -14435,8 +14395,7 @@
         ],
         "text-field": "{name:en}",
         "text-font": [
-          "Noto Sans Regular",
-          "Noto Sans Bold"
+          "Noto Sans Regular"
         ],
         "text-max-width": 6.25,
         "text-size": [

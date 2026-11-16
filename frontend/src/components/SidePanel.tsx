@@ -71,6 +71,13 @@ function Progress({ active, label, pct }: { active: boolean; label: string; pct:
   );
 }
 
+// Full basemap names, shown as the trigger's hover title when truncated.
+const BASEMAP_LABELS: Record<string, string> = {
+  satellite: "Satellite (ESRI)", hillshade: "Hillshade", none: "None",
+  liberty: "Light (OpenFreeMap Liberty)", "osm-dark": "Dark (Maptiler w. OFM tiles)",
+  light: "Light (OpenFreeMap Positron)", dark: "Dark (OpenFreeMap)",
+};
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -695,12 +702,14 @@ export function SidePanel(p: {
               </Tabs>
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] text-muted-foreground"
-                title="Smooth: bilinear filtering. MapLibre blends the encoded bytes, not the heights, so thin rings can appear at every whole metre and at 0 m. Off: nearest pixel, exact values, blockier when zoomed in.">smooth</span>
-              <Switch checked={opts.smooth} onCheckedChange={(v) => setOpts({ smooth: v })} aria-label="Smooth colour relief (bilinear)" />
               <span className="font-mono text-[10px] text-muted-foreground">log</span>
               <Switch checked={opts.log} onCheckedChange={(v) => setOpts({ log: v })} />
             </div>
+          </div>
+          <div className="flex items-center justify-between gap-2"
+            title="Smooth: bilinear filtering. MapLibre blends the encoded bytes, not the heights, so thin rings can appear at every whole metre and at 0 m. Off: nearest pixel, exact values, blockier when zoomed in.">
+            <span className="font-mono text-[10px] text-muted-foreground">Smooth (bilinear)</span>
+            <Switch checked={opts.smooth} onCheckedChange={(v) => setOpts({ smooth: v })} aria-label="Smooth colour relief (bilinear)" />
           </div>
         </>)}
       </div>
@@ -713,9 +722,9 @@ export function SidePanel(p: {
         {!ui.foldLayers && (<>
           <div className="flex items-center justify-between">
             <Label>Basemap</Label>
-            <div className="w-44">
+            <div className="w-44 min-w-0">
               <Select value={opts.base} onValueChange={(v) => setOpts({ base: v as Opts["base"] })}>
-                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-7 text-xs" title={BASEMAP_LABELS[opts.base]}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="satellite">Satellite (ESRI)</SelectItem>
                   <SelectItem value="hillshade">Hillshade</SelectItem>
