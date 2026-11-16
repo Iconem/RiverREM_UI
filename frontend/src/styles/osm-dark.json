@@ -10964,25 +10964,38 @@
       "layout": {
         "icon-allow-overlap": false,
         "icon-image": [
-          "coalesce",
+          "case",
           [
-            "image",
+            "in",
             [
               "get",
               "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
             ]
           ],
           [
-            "image",
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
             [
               "get",
               "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
             ]
           ],
           [
-            "image",
-            "dot"
-          ]
+            "get",
+            "class"
+          ],
+          "shop_11"
         ],
         "symbol-sort-key": [
           "to-number",
@@ -11140,7 +11153,40 @@
       "minzoom": 18,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -11353,7 +11399,40 @@
       "minzoom": 16,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -11425,7 +11504,40 @@
       "minzoom": 16,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -11574,7 +11686,40 @@
       "minzoom": 16,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -11650,7 +11795,40 @@
       "minzoom": 16,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -11734,7 +11912,40 @@
       "minzoom": 15,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -11884,7 +12095,40 @@
       "layout": {
         "icon-allow-overlap": false,
         "icon-ignore-placement": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -12002,7 +12246,40 @@
       "minzoom": 16,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{class}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -12150,7 +12427,7 @@
       "minzoom": 16,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "camping",
+        "icon-image": "campsite",
         "symbol-sort-key": [
           "to-number",
           [
@@ -12221,7 +12498,40 @@
       "minzoom": 17,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -12293,7 +12603,40 @@
       "minzoom": 16,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "icon-size": 1,
         "symbol-sort-key": [
           "to-number",
@@ -12363,7 +12706,7 @@
       "layout": {
         "icon-allow-overlap": false,
         "icon-anchor": "bottom",
-        "icon-image": "bus_stop.12",
+        "icon-image": "bus_11",
         "icon-keep-upright": true,
         "icon-pitch-alignment": "viewport",
         "icon-size": 1,
@@ -12441,7 +12784,40 @@
       "layout": {
         "icon-allow-overlap": false,
         "icon-anchor": "bottom",
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "icon-keep-upright": true,
         "icon-offset": [
           0,
@@ -12657,7 +13033,7 @@
       "layout": {
         "icon-allow-overlap": false,
         "icon-anchor": "bottom",
-        "icon-image": "square_train",
+        "icon-image": "railway_11",
         "icon-offset": [
           0,
           0
@@ -12725,7 +13101,7 @@
       "source-layer": "transportation",
       "minzoom": 15,
       "layout": {
-        "icon-image": "oneway-path",
+        "icon-image": "oneway",
         "icon-padding": 2,
         "icon-rotation-alignment": "map",
         "icon-size": {
@@ -13047,17 +13423,33 @@
       "minzoom": 9,
       "layout": {
         "icon-anchor": "center",
-        "icon-image": "road_tertiary",
+        "icon-image": [
+          "concat",
+          "road_",
+          [
+            "to-string",
+            [
+              "min",
+              6,
+              [
+                "max",
+                1,
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "ref_length"
+                  ],
+                  3
+                ]
+              ]
+            ]
+          ]
+        ],
         "icon-padding": 2,
         "icon-rotation-alignment": "viewport",
         "icon-size": 1,
-        "icon-text-fit": "both",
-        "icon-text-fit-padding": [
-          3,
-          4,
-          3,
-          4
-        ],
+        "icon-text-fit": "none",
         "symbol-avoid-edges": true,
         "symbol-placement": {
           "base": 1,
@@ -13097,7 +13489,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "text-color": "hsl(0, 0%, 55%)"
+        "text-color": "hsl(0, 0%, 15%)"
       },
       "filter": [
         "all",
@@ -13125,17 +13517,33 @@
       "minzoom": 9,
       "layout": {
         "icon-anchor": "center",
-        "icon-image": "road_secondary",
+        "icon-image": [
+          "concat",
+          "road_",
+          [
+            "to-string",
+            [
+              "min",
+              6,
+              [
+                "max",
+                1,
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "ref_length"
+                  ],
+                  3
+                ]
+              ]
+            ]
+          ]
+        ],
         "icon-padding": 2,
         "icon-rotation-alignment": "viewport",
         "icon-size": 1,
-        "icon-text-fit": "both",
-        "icon-text-fit-padding": [
-          3,
-          4,
-          3,
-          4
-        ],
+        "icon-text-fit": "none",
         "symbol-avoid-edges": true,
         "symbol-placement": {
           "base": 1,
@@ -13175,7 +13583,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "text-color": "hsl(47, 9%, 53%)"
+        "text-color": "hsl(0, 0%, 15%)"
       },
       "filter": [
         "all",
@@ -13203,17 +13611,33 @@
       "minzoom": 9,
       "layout": {
         "icon-anchor": "center",
-        "icon-image": "road_primary",
+        "icon-image": [
+          "concat",
+          "road_",
+          [
+            "to-string",
+            [
+              "min",
+              6,
+              [
+                "max",
+                1,
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "ref_length"
+                  ],
+                  3
+                ]
+              ]
+            ]
+          ]
+        ],
         "icon-padding": 2,
         "icon-rotation-alignment": "viewport",
         "icon-size": 1,
-        "icon-text-fit": "both",
-        "icon-text-fit-padding": [
-          3,
-          4,
-          3,
-          4
-        ],
+        "icon-text-fit": "none",
         "symbol-avoid-edges": true,
         "symbol-placement": {
           "base": 1,
@@ -13253,7 +13677,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "text-color": "hsl(36, 32%, 61%)"
+        "text-color": "hsl(0, 0%, 15%)"
       },
       "filter": [
         "all",
@@ -13281,17 +13705,33 @@
       "minzoom": 9,
       "layout": {
         "icon-anchor": "center",
-        "icon-image": "road_trunk",
+        "icon-image": [
+          "concat",
+          "road_",
+          [
+            "to-string",
+            [
+              "min",
+              6,
+              [
+                "max",
+                1,
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "ref_length"
+                  ],
+                  3
+                ]
+              ]
+            ]
+          ]
+        ],
         "icon-padding": 2,
         "icon-rotation-alignment": "viewport",
         "icon-size": 1,
-        "icon-text-fit": "both",
-        "icon-text-fit-padding": [
-          3,
-          4,
-          3,
-          4
-        ],
+        "icon-text-fit": "none",
         "symbol-avoid-edges": true,
         "symbol-placement": {
           "base": 1,
@@ -13331,7 +13771,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "text-color": "hsl(23, 95%, 16%)"
+        "text-color": "hsl(0, 0%, 15%)"
       },
       "filter": [
         "all",
@@ -13359,17 +13799,33 @@
       "minzoom": 9,
       "layout": {
         "icon-anchor": "center",
-        "icon-image": "road_motorway",
+        "icon-image": [
+          "concat",
+          "road_",
+          [
+            "to-string",
+            [
+              "min",
+              6,
+              [
+                "max",
+                1,
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "ref_length"
+                  ],
+                  3
+                ]
+              ]
+            ]
+          ]
+        ],
         "icon-padding": 2,
         "icon-rotation-alignment": "viewport",
         "icon-size": 1,
-        "icon-text-fit": "both",
-        "icon-text-fit-padding": [
-          3,
-          4,
-          3,
-          4
-        ],
+        "icon-text-fit": "none",
         "symbol-avoid-edges": true,
         "symbol-placement": {
           "base": 1,
@@ -13412,7 +13868,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "text-color": "hsl(347, 16%, 72%)"
+        "text-color": "hsl(0, 0%, 15%)"
       },
       "filter": [
         "all",
@@ -13441,7 +13897,7 @@
       "maxzoom": 17,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "aerodrome.12",
+        "icon-image": "airport_11",
         "icon-size": 1,
         "symbol-sort-key": [
           "to-number",
@@ -13836,7 +14292,40 @@
       "minzoom": 12,
       "layout": {
         "icon-allow-overlap": false,
-        "icon-image": "{subclass}",
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "subclass"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "subclass"
+          ],
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              ["aerialway","airfield","airport","alcohol_shop","american_football","amusement_park","aquarium","arrow","art_gallery","attraction","bakery","bank","bar","baseball","basketball","beer","bicycle","bicycle_rental","building","bus","butcher","cafe","campsite","car","castle","cemetery","cinema","circle","circle_stroked","clothing_store","college","commercial","cricket","cross","dam","danger","dentist","doctors","dog_park","drinking_water","embassy","entrance","fast_food","ferry","fire_station","florist","fuel","furniture","garden","gift","golf","grocery","hairdresser","harbor","heart","heliport","hospital","ice_cream","industry","information","laundry","library","lighthouse","lodging","marker","monument","mountain","museum","music","oneway","park","parking","parking_garage","pedestrian_polygon","pharmacy","picnic_site","pitch","place_of_worship","playground","police","post","prison","railway","railway_light","railway_metro","ranger_station","religious_christian","religious_jewish","religious_muslim","restaurant","rocket","school","shelter","shop","skiing","soccer","square","square_stroked","stadium","star","star_stroked","suitcase","sushi","swimming","telephone","tennis","theatre","toilets","town_hall","triangle","triangle_stroked","veterinary","volcano","warehouse","waste_basket","water","wetland","wheelchair","zoo"]
+            ]
+          ],
+          [
+            "get",
+            "class"
+          ],
+          ""
+        ],
         "symbol-sort-key": [
           "to-number",
           [
@@ -13968,7 +14457,7 @@
       "source-layer": "mountain_peak",
       "maxzoom": 16,
       "layout": {
-        "icon-image": "peak",
+        "icon-image": "mountain",
         "symbol-sort-key": [
           "to-number",
           [
@@ -14222,11 +14711,11 @@
           "stops": [
             [
               4,
-              "place-6"
+              "circle_11_black"
             ],
             [
               7,
-              " "
+              ""
             ]
           ]
         },
@@ -14275,7 +14764,8 @@
             ]
           ]
         },
-        "visibility": "visible"
+        "visibility": "visible",
+        "icon-size": 0.4
       },
       "paint": {
         "text-color": "hsl(0, 0%, 75%)",
@@ -14311,7 +14801,7 @@
           "stops": [
             [
               6,
-              "place-capital-8"
+              "star_11"
             ],
             [
               8,
@@ -14324,7 +14814,7 @@
           3
         ],
         "icon-optional": false,
-        "icon-size": 1,
+        "icon-size": 0.4,
         "symbol-sort-key": [
           "to-number",
           [

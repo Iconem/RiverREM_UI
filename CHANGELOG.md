@@ -17,6 +17,9 @@ sessions, so dates are approximate; the ordering is chronological.
   to `CUSTOM_DEM_MAX_PIXELS`.
 
 ### Fixed
+- **Dark (Maptiler w. OFM tiles) basemap icons**: every MapTiler icon name missing from the
+  OpenFreeMap sprite (road shields, camping, bus stops, peaks, city dots, POIs) now maps to
+  an OFM icon; `scripts/build-ofm-styles.mjs` applies the mapping.
 - **Color relief artifacts** (PR #1 by @johnhuebbe): the REM layer resamples with
   `nearest`.
 - **Large centerline import** no longer overflows the stack when fitting the map.
