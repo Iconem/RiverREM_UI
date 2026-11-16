@@ -237,7 +237,17 @@ export function MapView({
     map.addLayer({
       id: layer, type: "color-relief", source: src,
       layout: { visibility: remVisible ? "visible" : "none" },
-      paint: { "color-relief-color": colorReliefExpr(opts.ramp, opts.min, opts.max, opts.reverse, opts.transparent) as any, "color-relief-opacity": 0.95 },
+	  paint: {
+	    "color-relief-color": colorReliefExpr(
+	      opts.ramp,
+	      opts.min,
+	      opts.max,
+	      opts.reverse,
+	      opts.transparent
+	    ) as any,
+	    "color-relief-opacity": 0.95,
+	    "resampling": "nearest",
+	  },
     } as any);
     remRef.current = { src, layer };
     // Bring overlay layers above the freshly added REM tint (river stays below REM intentionally)
